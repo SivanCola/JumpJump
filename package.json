@@ -1,0 +1,183 @@
+{
+  "name": "jumpjump",
+  "displayName": "JumpJump",
+  "description": "在项目中收藏文件夹、文件和代码位置，并通过侧边栏快速跳转。",
+  "version": "0.1.2",
+  "icon": "media/marketplace-icon.png",
+  "publisher": "SivanLiu",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SivanCola/JumpJump.git"
+  },
+  "homepage": "https://github.com/SivanCola/JumpJump",
+  "bugs": {
+    "url": "https://github.com/SivanCola/issues/issues"
+  },
+  "galleryBanner": {
+    "color": "#1f2233",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "files": [
+    "out/src/**/*.js",
+    "media/**",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "bookmark",
+    "navigation",
+    "jump",
+    "workspace",
+    "repository",
+    "cursor",
+    "vscode",
+    "go",
+    "python",
+    "sidebar"
+  ],
+  "activationEvents": [
+    "onView:jumpjump.bookmarks",
+    "onCommand:jumpjump.addCurrentFile",
+    "onCommand:jumpjump.addCurrentLine",
+    "onCommand:jumpjump.addCurrentFolder",
+    "onCommand:jumpjump.addFolder",
+    "onCommand:jumpjump.refresh",
+    "onCommand:jumpjump.deleteBookmark",
+    "onCommand:jumpjump.renameBookmark",
+    "onCommand:jumpjump.togglePinned",
+    "onCommand:jumpjump.openBookmark",
+    "onCommand:jumpjump.removeMissing"
+  ],
+  "main": "./out/src/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "jumpjump",
+          "title": "JumpJump",
+          "icon": "media/jumpjump.svg"
+        }
+      ]
+    },
+    "views": {
+      "jumpjump": [
+        {
+          "id": "jumpjump.bookmarks",
+          "name": "Bookmarks",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "jumpjump.addCurrentFile",
+        "title": "JumpJump · 添加本文件 / Add Current File"
+      },
+      {
+        "command": "jumpjump.addCurrentLine",
+        "title": "JumpJump · 添加当前代码位置 / Add Current Location"
+      },
+      {
+        "command": "jumpjump.addCurrentFolder",
+        "title": "JumpJump · 添加本文件所在目录 / Add Current Folder"
+      },
+      {
+        "command": "jumpjump.addFolder",
+        "title": "JumpJump · 文件夹 / Folder"
+      },
+      {
+        "command": "jumpjump.refresh",
+        "title": "JumpJump · 刷新 / Refresh"
+      },
+      {
+        "command": "jumpjump.deleteBookmark",
+        "title": "JumpJump · 删除书签 / Delete Bookmark"
+      },
+      {
+        "command": "jumpjump.renameBookmark",
+        "title": "JumpJump · 重命名书签 / Rename Bookmark"
+      },
+      {
+        "command": "jumpjump.togglePinned",
+        "title": "JumpJump · 置顶切换 / Toggle Pin"
+      },
+      {
+        "command": "jumpjump.openBookmark",
+        "title": "JumpJump · 打开书签 / Open Bookmark"
+      },
+      {
+        "command": "jumpjump.removeMissing",
+        "title": "JumpJump · 清理失效书签 / Clean Missing",
+        "icon": "$(trash)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "jumpjump.refresh",
+          "when": "view == jumpjump.bookmarks",
+          "group": "navigation@1"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "jumpjump.addCurrentFile",
+          "group": "navigation@90"
+        },
+        {
+          "command": "jumpjump.addCurrentFolder",
+          "group": "navigation@91"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "jumpjump.addCurrentLine",
+          "group": "navigation@90"
+        },
+        {
+          "command": "jumpjump.addCurrentFile",
+          "group": "navigation@91"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "jumpjump.addFolder",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation@99"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "jumpjump.addFolder",
+          "when": "false"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node -e \"require('fs').rmSync('out',{ recursive: true, force: true })\" && tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "tsc --noEmit -p ./",
+    "test": "mocha --require ts-node/register test/**/*.test.ts",
+    "vscode:prepublish": "npm run build",
+    "package:vsix": "node -e \"require('fs').mkdirSync('dist',{ recursive: true })\" && vsce package --out dist/jumpjump.vsix"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.6.2",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.13.10",
+    "@types/vscode": "^1.90.0",
+    "mocha": "^11.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  }
+}

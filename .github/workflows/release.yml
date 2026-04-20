@@ -1,0 +1,124 @@
+name: Release Extension
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "发布标签，例如 v0.1.0"
+        required: true
+      release_name:
+        description: "Release 标题，默认使用标签名"
+        required: false
+      prerelease:
+        description: "是否标记为预发布"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate dispatch tag exists
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if ! git rev-parse "${{ inputs.release_tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ inputs.release_tag }} does not exist."
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Package VSIX
+        run: npm run package:vsix
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.release_tag }}"
+            NAME="${{ inputs.release_name }}"
+            PRERELEASE="${{ inputs.prerelease }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+            NAME=""
+            PRERELEASE="false"
+          fi
+
+          if [ -z "$NAME" ]; then
+            NAME="$TAG"
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        shell: bash
+        run: |
+          set +e
+          OUTPUT="$(npx @vscode/vsce publish --packagePath dist/jumpjump.vsix -p "$VSCE_PAT" 2>&1)"
+          STATUS="$?"
+          set -e
+          echo "$OUTPUT"
+          if [ "$STATUS" -ne 0 ]; then
+            if echo "$OUTPUT" | grep -Eqi "already exists|duplicate"; then
+              echo "VS Code Marketplace version already exists; skipping publish."
+            else
+              exit "$STATUS"
+            fi
+          fi
+
+      - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        shell: bash
+        run: |
+          set +e
+          OUTPUT="$(npx ovsx publish dist/jumpjump.vsix -p "$OVSX_PAT" 2>&1)"
+          STATUS="$?"
+          set -e
+          echo "$OUTPUT"
+          if [ "$STATUS" -ne 0 ]; then
+            if echo "$OUTPUT" | grep -Eqi "already exists|duplicate"; then
+              echo "Open VSX version already exists; skipping publish."
+            else
+              exit "$STATUS"
+            fi
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          files: dist/jumpjump.vsix
