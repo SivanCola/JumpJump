@@ -7,7 +7,7 @@
 ### Changed
 
 - 仓库地址迁移到 `SivanCola/JumpJump`
-- Bug 反馈地址迁移到 `SivanCola/issues`
+- Bug 反馈地址迁移到 `SivanCola/JumpJump/issues`
 - Release 工作流在市场同版本已存在时跳过重复发布并继续后续步骤
 - 忽略本地 `.omx/` 运行时目录，避免推送本地 agent 状态
 

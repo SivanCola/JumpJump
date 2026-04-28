@@ -124,7 +124,7 @@ JumpJump is licensed under the Apache License, Version 2.0. See [LICENSE](LICENS
 
 ## Bug Reports
 
-- Report here: <https://github.com/SivanCola/issues/issues>
+- Report here: <https://github.com/SivanCola/JumpJump/issues>
 
 ---
 
@@ -237,4 +237,4 @@ JumpJump 使用 Apache License, Version 2.0 开源。详见 [LICENSE](LICENSE)�
 
 ## Bug 反馈
 
-- 提交地址：<https://github.com/SivanCola/issues/issues>
+- 提交地址：<https://github.com/SivanCola/JumpJump/issues>
