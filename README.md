@@ -169,6 +169,10 @@ That means JumpJump works per repository, not as one global bookmark list across
 JumpJump 将书签保存在当前仓库内，不会把书签上传到远程服务。  
 JumpJump stores bookmarks inside the current repository and does not upload them to a remote service.
 
+## 开源协议 / License
+
+JumpJump is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
+
 ## Bug 反馈 / Bug Reports
 
 - 提交地址 / Report here: <https://github.com/SivanCola/issues/issues>

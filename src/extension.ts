@@ -1,3 +1,6 @@
+// Copyright 2026 Xinwei
+// SPDX-License-Identifier: Apache-2.0
+
 import * as vscode from "vscode";
 import * as path from "path";
 import { BookmarkItem, BookmarkSortBy, BookmarkSortDirection, BookmarkType } from "./types";

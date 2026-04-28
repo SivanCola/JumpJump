@@ -1,3 +1,6 @@
+// Copyright 2026 Xinwei
+// SPDX-License-Identifier: Apache-2.0
+
 export type BookmarkType = "folder" | "file" | "line";
 export type BookmarkSortBy = "manual" | "label" | "createdAt" | "updatedAt" | "type";
 export type BookmarkSortDirection = "asc" | "desc";

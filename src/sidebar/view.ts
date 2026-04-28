@@ -1,3 +1,6 @@
+// Copyright 2026 Xinwei
+// SPDX-License-Identifier: Apache-2.0
+
 import * as fs from "fs/promises";
 import * as vscode from "vscode";
 import { BookmarkGroup, BookmarkItem, BookmarkSortBy } from "../types";

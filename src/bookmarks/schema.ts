@@ -1,3 +1,6 @@
+// Copyright 2026 Xinwei
+// SPDX-License-Identifier: Apache-2.0
+
 import { BookmarkFile, BookmarkGroup, BookmarkItem, BookmarkSortBy, BookmarkSortDirection, BookmarkType } from "../types";
 
 export const BOOKMARKS_VERSION = 2;
