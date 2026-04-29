@@ -9,9 +9,15 @@ import { openBookmark } from "./bookmarks/navigator";
 import { JumpJumpSidebarProvider, JumpJumpUnavailableSidebarProvider } from "./sidebar/view";
 
 type Locale = "zh" | "en";
+type ThemeMode = "system" | "dark" | "light" | "aurora" | "coffee" | "sunlit" | "clean" | "purple" | "contrast";
 const LOCALE_KEY = "jumpjump.locale";
+const THEME_KEY = "jumpjump.themeMode";
+const CONFIG_SECTION = "jumpjump";
+const COMPACT_MODE_SETTING = "compactMode";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  await setLocaleContext(getLocale(context));
+
   const workspaceRoot = getSingleWorkspaceRoot();
   if (!workspaceRoot) {
     context.subscriptions.push(
@@ -33,7 +39,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   sidebarProvider = new JumpJumpSidebarProvider(
     context.extensionUri,
-    path.basename(workspaceRoot.fsPath) || "Workspace",
     store,
     {
     addCurrentFile: async () => {
@@ -97,6 +102,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await store.reorderGroups(groupIds);
       await refreshSidebar();
     },
+    reorderBookmarks: async (groupId, itemIds) => {
+      await store.reorderBookmarksInGroup(groupId, itemIds);
+      await refreshSidebar();
+    },
+    moveBookmarkToGroupAndReorder: async (bookmark, groupId, itemIds) => {
+      await store.moveBookmarkToGroupAndReorder(bookmark.id, groupId, itemIds);
+      await refreshSidebar();
+    },
     deleteBookmark: async (bookmark) => {
       await deleteBookmark(store, bookmark, context);
       await refreshSidebar();
@@ -105,6 +118,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     () => getLocale(context),
     async (locale) => {
       await setLocale(context, locale);
+      await refreshSidebar();
+    },
+    () => getCompactMode(),
+    async (compactMode) => {
+      await setCompactMode(compactMode);
+      await refreshSidebar();
+    },
+    () => getThemeMode(context),
+    async (themeMode) => {
+      await setThemeMode(context, themeMode);
       await refreshSidebar();
     }
   );
@@ -118,14 +141,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("jumpjump.refresh", async () => {
       await guardedAction(refreshSidebar());
     }),
-    vscode.commands.registerCommand("jumpjump.addCurrentFile", async () => {
-      await guardedAction(addCurrentEditorBookmark(store, "file", context, sidebarProvider), refreshSidebar);
+    vscode.commands.registerCommand("jumpjump.refresh.zh", async () => {
+      await guardedAction(refreshSidebar());
+    }),
+    vscode.commands.registerCommand("jumpjump.refresh.en", async () => {
+      await guardedAction(refreshSidebar());
+    }),
+    vscode.commands.registerCommand("jumpjump.addCurrentFile", async (resource?: vscode.Uri) => {
+      await guardedAction(addCurrentFileBookmark(store, context, sidebarProvider, resource), refreshSidebar);
     }),
     vscode.commands.registerCommand("jumpjump.addCurrentLine", async () => {
       await guardedAction(addCurrentEditorBookmark(store, "line", context, sidebarProvider), refreshSidebar);
     }),
-    vscode.commands.registerCommand("jumpjump.addCurrentFolder", async () => {
-      await guardedAction(addCurrentFolderBookmark(store, context, sidebarProvider), refreshSidebar);
+    vscode.commands.registerCommand("jumpjump.addCurrentFolder", async (resource?: vscode.Uri) => {
+      await guardedAction(addCurrentFolderBookmark(store, context, sidebarProvider, resource), refreshSidebar);
     }),
     vscode.commands.registerCommand("jumpjump.addFolder", async (resource?: vscode.Uri) => {
       await guardedAction(addFolderBookmark(store, resource, context, sidebarProvider), refreshSidebar);
@@ -144,6 +173,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.commands.registerCommand("jumpjump.removeMissing", async () => {
       await guardedAction(removeMissingBookmarks(store, context), refreshSidebar);
+    }),
+    vscode.workspace.onDidChangeConfiguration(async (event) => {
+      if (event.affectsConfiguration(`${CONFIG_SECTION}.${COMPACT_MODE_SETTING}`)) {
+        await refreshSidebar();
+      }
     })
   );
 
@@ -164,7 +198,10 @@ async function addCurrentEditorBookmark(
     return;
   }
 
-  const absolutePath = editor.document.uri.fsPath;
+  const absolutePath = resolveBookmarkablePath(store, editor.document.uri, context);
+  if (!absolutePath) {
+    return;
+  }
   const label = buildSuggestedLabel(type, absolutePath, editor.selection.active.line + 1);
 
   const bookmark = await store.addBookmark({
@@ -176,13 +213,62 @@ async function addCurrentEditorBookmark(
   sidebarProvider?.highlightBookmark(bookmark.id);
 }
 
-async function addCurrentFolderBookmark(store: BookmarkStore, context: vscode.ExtensionContext, sidebarProvider?: JumpJumpSidebarProvider): Promise<void> {
+async function addCurrentFileBookmark(
+  store: BookmarkStore,
+  context: vscode.ExtensionContext,
+  sidebarProvider?: JumpJumpSidebarProvider,
+  resource?: vscode.Uri
+): Promise<void> {
+  if (!resource) {
+    await addCurrentEditorBookmark(store, "file", context, sidebarProvider);
+    return;
+  }
+
+  const absolutePath = resolveBookmarkablePath(store, resource, context);
+  if (!absolutePath) {
+    return;
+  }
+  const stat = await vscode.workspace.fs.stat(resource);
+  if ((stat.type & vscode.FileType.Directory) !== 0) {
+    await addFolderBookmark(store, resource, context, sidebarProvider);
+    return;
+  }
+
+  const bookmark = await store.addBookmark({
+    type: "file",
+    label: buildSuggestedLabel("file", absolutePath, 1),
+    absolutePath
+  });
+  sidebarProvider?.highlightBookmark(bookmark.id);
+}
+
+async function addCurrentFolderBookmark(
+  store: BookmarkStore,
+  context: vscode.ExtensionContext,
+  sidebarProvider?: JumpJumpSidebarProvider,
+  resource?: vscode.Uri
+): Promise<void> {
+  if (resource) {
+    const absolutePath = resolveBookmarkablePath(store, resource, context);
+    if (!absolutePath) {
+      return;
+    }
+    const stat = await vscode.workspace.fs.stat(resource);
+    const folderUri = (stat.type & vscode.FileType.Directory) !== 0 ? resource : vscode.Uri.file(path.dirname(absolutePath));
+    await addFolderBookmark(store, folderUri, context, sidebarProvider);
+    return;
+  }
+
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     void vscode.window.showWarningMessage(tr(context, "warning.noEditorForFolder"));
     return;
   }
-  await addFolderBookmark(store, vscode.Uri.file(path.dirname(editor.document.uri.fsPath)), context, sidebarProvider);
+  const absolutePath = resolveBookmarkablePath(store, editor.document.uri, context);
+  if (!absolutePath) {
+    return;
+  }
+  await addFolderBookmark(store, vscode.Uri.file(path.dirname(absolutePath)), context, sidebarProvider);
 }
 
 async function addFolderBookmark(
@@ -196,12 +282,16 @@ async function addFolderBookmark(
     return;
   }
 
-  const label = `${path.basename(resource.fsPath) || "文件夹"}/`;
+  const absolutePath = resolveBookmarkablePath(store, resource, context);
+  if (!absolutePath) {
+    return;
+  }
+  const label = `${path.basename(absolutePath) || "文件夹"}/`;
 
   const bookmark = await store.addBookmark({
     type: "folder",
     label,
-    absolutePath: resource.fsPath
+    absolutePath
   });
   sidebarProvider?.highlightBookmark(bookmark.id);
 }
@@ -331,6 +421,8 @@ function registerUnavailableCommands(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("jumpjump.refresh", warn),
+    vscode.commands.registerCommand("jumpjump.refresh.zh", warn),
+    vscode.commands.registerCommand("jumpjump.refresh.en", warn),
     vscode.commands.registerCommand("jumpjump.addCurrentFile", warn),
     vscode.commands.registerCommand("jumpjump.addCurrentLine", warn),
     vscode.commands.registerCommand("jumpjump.addCurrentFolder", warn),
@@ -360,6 +452,22 @@ function buildSuggestedLabel(type: Extract<BookmarkType, "file" | "line">, absol
   return type === "line" ? `${fileName}:${lineNumber}` : fileName;
 }
 
+function resolveBookmarkablePath(
+  store: BookmarkStore,
+  resource: vscode.Uri,
+  context: vscode.ExtensionContext
+): string | undefined {
+  if (resource.scheme !== "file") {
+    void vscode.window.showWarningMessage(tr(context, "warning.localWorkspaceOnly"));
+    return undefined;
+  }
+  if (!store.isPathInsideWorkspace(resource.fsPath)) {
+    void vscode.window.showWarningMessage(tr(context, "warning.localWorkspaceOnly"));
+    return undefined;
+  }
+  return resource.fsPath;
+}
+
 function getLocale(context: vscode.ExtensionContext): Locale {
   const value = context.globalState.get<string>(LOCALE_KEY);
   return value === "en" ? "en" : "zh";
@@ -367,6 +475,44 @@ function getLocale(context: vscode.ExtensionContext): Locale {
 
 async function setLocale(context: vscode.ExtensionContext, locale: Locale): Promise<void> {
   await context.globalState.update(LOCALE_KEY, locale);
+  await setLocaleContext(locale);
+}
+
+async function setLocaleContext(locale: Locale): Promise<void> {
+  await vscode.commands.executeCommand("setContext", "jumpjump.locale", locale);
+}
+
+function getCompactMode(): boolean {
+  return vscode.workspace.getConfiguration(CONFIG_SECTION).get<boolean>(COMPACT_MODE_SETTING, true);
+}
+
+async function setCompactMode(compactMode: boolean): Promise<void> {
+  await vscode.workspace
+    .getConfiguration(CONFIG_SECTION)
+    .update(COMPACT_MODE_SETTING, compactMode, vscode.ConfigurationTarget.Global);
+}
+
+function getThemeMode(context: vscode.ExtensionContext): ThemeMode {
+  const value = context.globalState.get<string>(THEME_KEY);
+  return isThemeMode(value) ? value : "system";
+}
+
+async function setThemeMode(context: vscode.ExtensionContext, themeMode: ThemeMode): Promise<void> {
+  await context.globalState.update(THEME_KEY, themeMode);
+}
+
+function isThemeMode(value: unknown): value is ThemeMode {
+  return (
+    value === "system" ||
+    value === "dark" ||
+    value === "light" ||
+    value === "aurora" ||
+    value === "coffee" ||
+    value === "sunlit" ||
+    value === "clean" ||
+    value === "purple" ||
+    value === "contrast"
+  );
 }
 
 function tr(context: vscode.ExtensionContext, key: string, arg?: string): string {
@@ -383,6 +529,7 @@ function translate(locale: Locale, key: string, arg?: string): string {
     "warning.singleWorkspaceOnly": "JumpJump 需要在单一工作区中使用。请先打开一个项目目录。",
     "warning.groupFormRequired": "请在 JumpJump 侧边栏内完成分组名称输入。",
     "warning.groupPickerRequired": "请在 JumpJump 侧边栏内选择目标分组。",
+    "warning.localWorkspaceOnly": "只能收藏当前仓库内的本地文件或目录。",
     "confirm.deleteBookmark": `删除书签“${arg ?? ""}”？`,
     "confirm.deleteGroup": `删除分组“${arg ?? ""}”？组内书签会回到“未分组”。`,
     "action.delete": "删除",
@@ -419,6 +566,7 @@ function translate(locale: Locale, key: string, arg?: string): string {
     "warning.singleWorkspaceOnly": "JumpJump works in a single-root workspace. Please open one project folder first.",
     "warning.groupFormRequired": "Please enter the group name inside the JumpJump sidebar.",
     "warning.groupPickerRequired": "Please choose a target group inside the JumpJump sidebar.",
+    "warning.localWorkspaceOnly": "Only local files or folders inside the current workspace can be bookmarked.",
     "confirm.deleteBookmark": `Delete bookmark "${arg ?? ""}"?`,
     "confirm.deleteGroup": `Delete group "${arg ?? ""}"? Its bookmarks will move back to "Ungrouped".`,
     "action.delete": "Delete",

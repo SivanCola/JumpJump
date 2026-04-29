@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#141520"/>
+      <stop offset="1" stop-color="#090a12"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#282b44"/>
+      <stop offset="1" stop-color="#181a2a"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#242638"/>
+      <stop offset="1" stop-color="#171926"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000" flood-opacity=".28"/>
+    </filter>
+  </defs>
+  <rect width="1280" height="760" fill="url(#bg)"/>
+  <circle cx="1040" cy="80" r="300" fill="#7d92ff" opacity=".11"/>
+  <circle cx="146" cy="650" r="260" fill="#3ecf8e" opacity=".06"/>
+  <rect x="84" y="52" width="1112" height="656" rx="22" fill="#10121d" filter="url(#shadow)"/>
+  <rect x="84" y="52" width="58" height="656" rx="22" fill="#0d0f19"/>
+  <g fill="none" stroke="#aeb7d0" stroke-width="3" opacity=".76">
+    <rect x="104" y="92" width="18" height="22" rx="3"/>
+    <circle cx="113" cy="160" r="11"/>
+    <path d="M102 226h22M113 215v22"/>
+    <path d="M103 297h22l-11 18z"/>
+    <rect x="103" y="366" width="22" height="22" rx="4"/>
+    <path d="M103 462h22M103 478h22M103 494h22"/>
+    <circle cx="114" cy="636" r="13"/>
+  </g>
+  <rect x="142" y="52" width="396" height="656" fill="#121421"/>
+  <text x="170" y="91" fill="#d9c0ff" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="700" letter-spacing="1.2">BOOKMARKS</text>
+  <text x="382" y="91" fill="#eef1ff" font-family="Inter,Arial,sans-serif" font-size="15">JumpJump: Refresh</text>
+  <g transform="translate(170 122)">
+    <rect width="320" height="94" rx="13" fill="url(#panel)" stroke="#7f86a8"/>
+    <text x="18" y="30" fill="#f2f4ff" font-family="Inter,Arial,sans-serif" font-size="19" font-weight="700">Navigator</text>
+    <rect x="18" y="52" width="80" height="27" rx="14" fill="#30344f" stroke="#626a8c"/>
+    <text x="32" y="70" fill="#f0f2ff" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="600">Compact</text>
+    <rect x="108" y="52" width="82" height="27" rx="14" fill="#30344f" stroke="#626a8c"/>
+    <text x="124" y="70" fill="#f0f2ff" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="600">English</text>
+    <circle cx="214" cy="65" r="14" fill="#30344f" stroke="#626a8c"/>
+    <path d="M214 56a9 9 0 0 1 0 18z" fill="#f2f4ff"/>
+  </g>
+  <g transform="translate(170 236)">
+    <rect width="320" height="158" rx="13" fill="url(#panel)" stroke="#7f86a8"/>
+    <rect x="20" y="20" width="280" height="36" rx="18" fill="#25283b" stroke="#7f86a8"/>
+    <text x="103" y="43" fill="#f2f4ff" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="700">Clean Missing</text>
+    <rect x="20" y="68" width="280" height="36" rx="18" fill="#1b1d2b" stroke="#6b728f"/>
+    <text x="37" y="91" fill="#aeb7d0" font-family="Inter,Arial,sans-serif" font-size="15">Search label, path, or group</text>
+    <g font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700">
+      <rect x="20" y="116" width="42" height="28" rx="14" fill="#43517f" stroke="#9aa5d4"/><text x="34" y="135" fill="#fff">All</text>
+      <rect x="70" y="116" width="72" height="28" rx="14" fill="#25283b" stroke="#8d94ad"/><text x="85" y="135" fill="#f1f3ff">Pinned</text>
+      <rect x="150" y="116" width="66" height="28" rx="14" fill="#25283b" stroke="#8d94ad"/><text x="165" y="135" fill="#f1f3ff">Folder</text>
+      <rect x="224" y="116" width="48" height="28" rx="14" fill="#25283b" stroke="#8d94ad"/><text x="237" y="135" fill="#f1f3ff">File</text>
+    </g>
+  </g>
+  <g transform="translate(170 416)">
+    <rect width="320" height="256" rx="13" fill="url(#panel)" stroke="#7f86a8"/>
+    <path d="M20 25h10l-5 7z" fill="#eef1ff"/>
+    <text x="42" y="34" fill="#eef1ff" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="800" letter-spacing=".8">UNGROUPED</text>
+    <rect x="212" y="15" width="50" height="26" rx="13" fill="#30344f" stroke="#8d94ad"/>
+    <text x="226" y="33" fill="#fff" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="700">4 items</text>
+    <rect x="270" y="15" width="36" height="26" rx="13" fill="#30344f" stroke="#8d94ad"/>
+    <text x="281" y="33" fill="#fff" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="700">...</text>
+    <g transform="translate(16 56)">
+      <rect width="288" height="82" rx="10" fill="url(#card)" stroke="#34384f"/>
+      <text x="14" y="26" fill="#eef1ff" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="800">src/</text>
+      <rect x="14" y="36" width="54" height="22" rx="11" fill="#17324f" stroke="#67b7ff"/><text x="25" y="51" fill="#dff2ff" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="700">Folder</text>
+      <rect x="76" y="36" width="58" height="22" rx="11" fill="#3b2c0b" stroke="#e1b94c"/><text x="88" y="51" fill="#ffd76c" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="700">Pinned</text>
+      <text x="14" y="74" fill="#eef1ff" font-family="Inter,Arial,sans-serif" font-size="14">src</text>
+      <circle cx="266" cy="42" r="14" fill="#25283b" stroke="#8d94ad"/><text x="257" y="47" fill="#fff" font-family="Inter,Arial,sans-serif" font-size="13">...</text>
+    </g>
+    <g transform="translate(16 148)">
+      <rect width="288" height="82" rx="10" fill="url(#card)" stroke="#34384f"/>
+      <text x="14" y="26" fill="#eef1ff" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="800">schema.test.ts:57</text>
+      <rect x="14" y="36" width="52" height="22" rx="11" fill="#12382c" stroke="#75f0c0"/><text x="25" y="51" fill="#d7fff1" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="700">Code</text>
+      <text x="14" y="74" fill="#eef1ff" font-family="Inter,Arial,sans-serif" font-size="14">test/schema.test.ts</text>
+      <circle cx="266" cy="42" r="14" fill="#25283b" stroke="#8d94ad"/><text x="257" y="47" fill="#fff" font-family="Inter,Arial,sans-serif" font-size="13">...</text>
+    </g>
+  </g>
+  <g transform="translate(590 130)">
+    <text x="0" y="0" fill="#ffffff" font-family="Inter,Arial,sans-serif" font-size="42" font-weight="800">Fast repository navigation</text>
+    <text x="0" y="46" fill="#b9c2df" font-family="Inter,Arial,sans-serif" font-size="22">Save folders, files, and exact code locations.</text>
+    <text x="0" y="84" fill="#b9c2df" font-family="Inter,Arial,sans-serif" font-size="22">Search, filter, pin, group, drag, and jump from one sidebar.</text>
+    <g transform="translate(0 140)" fill="#f2f4ff" font-family="Inter,Arial,sans-serif" font-size="20">
+      <circle cx="10" cy="-6" r="5" fill="#75f0c0"/><text x="30" y="0">Repository-local bookmarks in <tspan font-family="Menlo,monospace">.jumpjump/bookmarks.json</tspan></text>
+      <circle cx="10" cy="44" r="5" fill="#bd7cff"/><text x="30" y="50">Compact and standard layouts for daily navigation</text>
+      <circle cx="10" cy="94" r="5" fill="#ffd166"/><text x="30" y="100">English/Chinese UI and curated sidebar themes</text>
+      <circle cx="10" cy="144" r="5" fill="#88c0d0"/><text x="30" y="150">Group menus, drag sorting, and missing target cleanup</text>
+    </g>
+  </g>
+</svg>

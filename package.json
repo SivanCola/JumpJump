@@ -1,8 +1,8 @@
 {
   "name": "jumpjump",
   "displayName": "JumpJump",
-  "description": "在项目中收藏文件夹、文件和代码位置，并通过侧边栏快速跳转。",
-  "version": "0.1.2",
+  "description": "在侧边栏收藏、分组、搜索和跳转仓库里的目录、文件与代码位置。",
+  "version": "0.1.3",
   "icon": "media/marketplace-icon.png",
   "publisher": "SivanLiu",
   "license": "Apache-2.0",
@@ -42,7 +42,9 @@
     "vscode",
     "go",
     "python",
-    "sidebar"
+    "sidebar",
+    "bookmarks",
+    "theme"
   ],
   "activationEvents": [
     "onView:jumpjump.bookmarks",
@@ -51,6 +53,8 @@
     "onCommand:jumpjump.addCurrentFolder",
     "onCommand:jumpjump.addFolder",
     "onCommand:jumpjump.refresh",
+    "onCommand:jumpjump.refresh.zh",
+    "onCommand:jumpjump.refresh.en",
     "onCommand:jumpjump.deleteBookmark",
     "onCommand:jumpjump.renameBookmark",
     "onCommand:jumpjump.togglePinned",
@@ -59,6 +63,16 @@
   ],
   "main": "./out/src/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "JumpJump",
+      "properties": {
+        "jumpjump.compactMode": {
+          "type": "boolean",
+          "default": true,
+          "description": "使用更紧凑的 JumpJump 侧边栏布局，减少间距并压缩书签行。"
+        }
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -80,51 +94,64 @@
     "commands": [
       {
         "command": "jumpjump.addCurrentFile",
-        "title": "JumpJump · 添加本文件 / Add Current File"
+        "title": "JumpJump: Add Current File"
       },
       {
         "command": "jumpjump.addCurrentLine",
-        "title": "JumpJump · 添加当前代码位置 / Add Current Location"
+        "title": "JumpJump: Add Current Location"
       },
       {
         "command": "jumpjump.addCurrentFolder",
-        "title": "JumpJump · 添加本文件所在目录 / Add Current Folder"
+        "title": "JumpJump: Add Current Folder"
       },
       {
         "command": "jumpjump.addFolder",
-        "title": "JumpJump · 文件夹 / Folder"
+        "title": "JumpJump: Add Folder"
       },
       {
         "command": "jumpjump.refresh",
-        "title": "JumpJump · 刷新 / Refresh"
+        "title": "JumpJump: Refresh"
+      },
+      {
+        "command": "jumpjump.refresh.zh",
+        "title": "JumpJump: 刷新"
+      },
+      {
+        "command": "jumpjump.refresh.en",
+        "title": "JumpJump: Refresh"
       },
       {
         "command": "jumpjump.deleteBookmark",
-        "title": "JumpJump · 删除书签 / Delete Bookmark"
+        "title": "JumpJump: Delete Bookmark"
       },
       {
         "command": "jumpjump.renameBookmark",
-        "title": "JumpJump · 重命名书签 / Rename Bookmark"
+        "title": "JumpJump: Rename Bookmark"
       },
       {
         "command": "jumpjump.togglePinned",
-        "title": "JumpJump · 置顶切换 / Toggle Pin"
+        "title": "JumpJump: Toggle Pin"
       },
       {
         "command": "jumpjump.openBookmark",
-        "title": "JumpJump · 打开书签 / Open Bookmark"
+        "title": "JumpJump: Open Bookmark"
       },
       {
         "command": "jumpjump.removeMissing",
-        "title": "JumpJump · 清理失效书签 / Clean Missing",
+        "title": "JumpJump: Clean Missing",
         "icon": "$(trash)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "jumpjump.refresh",
-          "when": "view == jumpjump.bookmarks",
+          "command": "jumpjump.refresh.zh",
+          "when": "view == jumpjump.bookmarks && jumpjump.locale == zh",
+          "group": "navigation@1"
+        },
+        {
+          "command": "jumpjump.refresh.en",
+          "when": "view == jumpjump.bookmarks && jumpjump.locale == en",
           "group": "navigation@1"
         }
       ],
@@ -146,16 +173,33 @@
         {
           "command": "jumpjump.addCurrentFile",
           "group": "navigation@91"
+        },
+        {
+          "command": "jumpjump.addCurrentFolder",
+          "group": "navigation@92"
         }
       ],
       "explorer/context": [
         {
-          "command": "jumpjump.addFolder",
-          "when": "explorerResourceIsFolder",
-          "group": "navigation@99"
+          "command": "jumpjump.addCurrentFile",
+          "when": "resourceScheme == file && !explorerResourceIsFolder",
+          "group": "navigation@98"
+        },
+        {
+          "command": "jumpjump.addCurrentFolder",
+          "when": "resourceScheme == file && explorerResourceIsFolder",
+          "group": "navigation@98"
         }
       ],
       "commandPalette": [
+        {
+          "command": "jumpjump.refresh.zh",
+          "when": "false"
+        },
+        {
+          "command": "jumpjump.refresh.en",
+          "when": "false"
+        },
         {
           "command": "jumpjump.addFolder",
           "when": "false"
@@ -179,5 +223,9 @@
     "mocha": "^11.1.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.2"
+  },
+  "overrides": {
+    "diff": "^9.0.0",
+    "serialize-javascript": "^7.0.5"
   }
 }

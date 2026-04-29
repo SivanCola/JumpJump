@@ -6,6 +6,10 @@ import * as vscode from "vscode";
 import { BookmarkGroup, BookmarkItem, BookmarkSortBy } from "../types";
 import { BookmarkStore } from "../bookmarks/store";
 import { UNGROUPED_GROUP_ID } from "../bookmarks/schema";
+import { sortSectionItems } from "./helpers";
+
+type ThemeMode = "system" | "dark" | "light" | "aurora" | "coffee" | "sunlit" | "clean" | "purple" | "contrast";
+const FEEDBACK_URL = "https://github.com/SivanCola/JumpJump/issues";
 
 interface SidebarSection {
   id: string;
@@ -35,7 +39,8 @@ interface SidebarBookmarkItem {
 
 interface SidebarState {
   locale: "zh" | "en";
-  workspaceName: string;
+  compactMode: boolean;
+  themeMode: ThemeMode;
   total: number;
   groups: number;
   missing: number;
@@ -49,6 +54,9 @@ type SidebarMessage =
   | { type: "ready" }
   | { type: "refresh" }
   | { type: "toggleLanguage" }
+  | { type: "toggleCompactMode" }
+  | { type: "setThemeMode"; themeMode: ThemeMode }
+  | { type: "openFeedback" }
   | { type: "addCurrentFile" }
   | { type: "addCurrentLine" }
   | { type: "addCurrentFolder" }
@@ -58,6 +66,8 @@ type SidebarMessage =
   | { type: "setGroupSort"; groupId: string; sortBy: BookmarkSortBy }
   | { type: "toggleGroupCollapsed"; groupId: string; collapsed: boolean }
   | { type: "reorderGroups"; groupIds: string[] }
+  | { type: "reorderBookmarks"; groupId: string; itemIds: string[] }
+  | { type: "moveBookmarkToGroupAndReorder"; id: string; groupId: string; itemIds: string[] }
   | { type: "removeMissing" }
   | { type: "openBookmark"; id: string }
   | { type: "renameBookmark"; id: string; label?: string }
@@ -65,6 +75,20 @@ type SidebarMessage =
   | { type: "togglePinned"; id: string }
   | { type: "moveBookmarkToGroup"; id: string; groupId?: string }
   | { type: "moveBookmarkWithinGroup"; id: string; direction: "up" | "down" };
+
+function isThemeMode(value: unknown): value is ThemeMode {
+  return (
+    value === "system" ||
+    value === "dark" ||
+    value === "light" ||
+    value === "aurora" ||
+    value === "coffee" ||
+    value === "sunlit" ||
+    value === "clean" ||
+    value === "purple" ||
+    value === "contrast"
+  );
+}
 
 export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "jumpjump.bookmarks";
@@ -75,7 +99,6 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly workspaceName: string,
     private readonly store: BookmarkStore,
     private readonly commandHandlers: {
       addCurrentFile: () => Promise<void>;
@@ -87,6 +110,8 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       setGroupSort: (groupId: string, sortBy: BookmarkSortBy) => Promise<void>;
       setGroupCollapsed: (groupId: string, collapsed: boolean) => Promise<void>;
       reorderGroups: (groupIds: string[]) => Promise<void>;
+      reorderBookmarks: (groupId: string, itemIds: string[]) => Promise<void>;
+      moveBookmarkToGroupAndReorder: (bookmark: BookmarkItem, groupId: string, itemIds: string[]) => Promise<void>;
       removeMissing: () => Promise<void>;
       togglePinned: (bookmark: BookmarkItem) => Promise<void>;
       moveBookmarkToGroup: (bookmark: BookmarkItem, groupId?: string) => Promise<void>;
@@ -96,7 +121,11 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       deleteBookmark: (bookmark: BookmarkItem) => Promise<void>;
     },
     private readonly getLocale: () => "zh" | "en",
-    private readonly setLocale: (locale: "zh" | "en") => Promise<void>
+    private readonly setLocale: (locale: "zh" | "en") => Promise<void>,
+    private readonly getCompactMode: () => boolean,
+    private readonly setCompactMode: (compactMode: boolean) => Promise<void>,
+    private readonly getThemeMode: () => ThemeMode,
+    private readonly setThemeMode: (themeMode: ThemeMode) => Promise<void>
   ) {}
 
   async resolveWebviewView(webviewView: vscode.WebviewView): Promise<void> {
@@ -106,7 +135,12 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this.extensionUri]
     };
     webviewView.webview.onDidReceiveMessage(async (message: SidebarMessage) => {
-      await this.handleMessage(message);
+      try {
+        await this.handleMessage(message);
+      } catch (error) {
+        void vscode.window.showErrorMessage((error as Error).message);
+        await this.refresh().catch(() => undefined);
+      }
     });
 
     webviewView.webview.html = this.getHtml(webviewView.webview);
@@ -130,6 +164,19 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       case "toggleLanguage":
         await this.setLocale(this.getLocale() === "zh" ? "en" : "zh");
         await this.refresh();
+        return;
+      case "toggleCompactMode":
+        await this.setCompactMode(!this.getCompactMode());
+        await this.refresh();
+        return;
+      case "setThemeMode":
+        if (isThemeMode(message.themeMode)) {
+          await this.setThemeMode(message.themeMode);
+        }
+        await this.refresh();
+        return;
+      case "openFeedback":
+        await vscode.env.openExternal(vscode.Uri.parse(FEEDBACK_URL));
         return;
       case "addCurrentFile":
         await this.commandHandlers.addCurrentFile();
@@ -158,6 +205,16 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       case "reorderGroups":
         await this.commandHandlers.reorderGroups(message.groupIds);
         return;
+      case "reorderBookmarks":
+        await this.commandHandlers.reorderBookmarks(message.groupId, message.itemIds);
+        return;
+      case "moveBookmarkToGroupAndReorder": {
+        const bookmark = await this.findBookmark(message.id);
+        if (bookmark) {
+          await this.commandHandlers.moveBookmarkToGroupAndReorder(bookmark, message.groupId, message.itemIds);
+        }
+        return;
+      }
       case "removeMissing":
         await this.commandHandlers.removeMissing();
         return;
@@ -227,7 +284,8 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
 
     return {
       locale,
-      workspaceName: this.workspaceName,
+      compactMode: this.getCompactMode(),
+      themeMode: this.getThemeMode(),
       total: file.items.length,
       groups: file.groups.filter((group) => !group.system).length,
       missing: itemsWithState.filter((item) => item.missing).length,
@@ -277,8 +335,36 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         --warning: #ffb86b;
         --danger: var(--vscode-errorForeground);
         --focus: var(--vscode-focusBorder);
+        --page-glow-1: rgba(80, 115, 255, 0.16);
+        --page-glow-2: rgba(33, 202, 255, 0.08);
+        --hero-gradient-start: rgba(102, 125, 255, 0.22);
+        --hero-gradient-end: rgba(12, 14, 27, 0.14);
+        --hero-sheen-start: rgba(255,255,255,0.05);
+        --hero-sheen-end: rgba(255,255,255,0.01);
+        --hero-orb: rgba(62, 207, 142, 0.18);
+        --toolbar-gradient-start: rgba(109,141,255,.16);
+        --toolbar-gradient-mid: rgba(109,141,255,.05);
+        --toolbar-gradient-end: rgba(255,255,255,.02);
+        --toolbar-glow: rgba(109, 141, 255, 0.14);
+        --toolbar-glow-secondary: rgba(62, 207, 142, 0.06);
+        --badge-folder-fg: #86d1ff;
+        --badge-folder-bg: rgba(82, 184, 255, .12);
+        --badge-folder-border: rgba(134, 209, 255, .34);
+        --badge-file-fg: #9db2ff;
+        --badge-file-bg: rgba(125, 146, 255, .12);
+        --badge-file-border: rgba(157, 178, 255, .34);
+        --badge-line-fg: #9bf0c9;
+        --badge-line-bg: rgba(62, 207, 142, .12);
+        --badge-line-border: rgba(155, 240, 201, .34);
+        --badge-pin-fg: #ffd166;
+        --badge-pin-bg: rgba(255, 209, 102, .12);
+        --badge-pin-border: rgba(255, 209, 102, .36);
+        --badge-missing-fg: #ff9c9c;
+        --badge-missing-bg: rgba(255, 80, 80, .1);
+        --badge-missing-border: rgba(255, 156, 156, .34);
         --shadow-lg: 0 18px 40px rgba(0, 0, 0, 0.22);
         --shadow-md: 0 10px 24px rgba(0, 0, 0, 0.16);
+        --sidebar-min-width: 340px;
         --radius-xl: 18px;
         --radius-lg: 14px;
         --radius-md: 12px;
@@ -287,6 +373,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
 
       * { box-sizing: border-box; }
       html {
+        min-height: 100%;
         scroll-behavior: smooth;
         scrollbar-gutter: stable;
       }
@@ -294,11 +381,425 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         margin: 0;
         color: var(--fg);
         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+        min-height: 100vh;
         overflow-y: auto;
-        background:
-          radial-gradient(circle at top right, rgba(80, 115, 255, 0.16), transparent 28%),
-          radial-gradient(circle at top left, rgba(33, 202, 255, 0.08), transparent 22%),
+        overflow-x: auto;
+        min-width: var(--sidebar-min-width);
+        background-color: var(--bg);
+        background-image:
+          radial-gradient(circle at top right, var(--page-glow-1), transparent 34%),
+          radial-gradient(circle at top left, var(--page-glow-2), transparent 30%),
           linear-gradient(180deg, color-mix(in srgb, var(--bg) 82%, black 18%), var(--bg));
+        background-repeat: no-repeat;
+        background-size: 100% 560px, 100% 460px, 100% 680px;
+        background-position: top right, top left, top left;
+      }
+
+      body.theme-dark {
+        color-scheme: dark;
+        --bg: #141520;
+        --panel: #202234;
+        --panel-2: #191b2a;
+        --panel-3: #11131f;
+        --border: rgba(213, 219, 255, .16);
+        --fg: #edf1ff;
+        --muted: #aab3cf;
+        --accent: #7d92ff;
+        --accent-soft: rgba(125, 146, 255, .18);
+        --accent-fg: #ffffff;
+        --danger: #ff7aa7;
+        --focus: #8da0ff;
+        --page-glow-1: rgba(125, 146, 255, .18);
+        --page-glow-2: rgba(62, 207, 142, .08);
+        --hero-gradient-start: rgba(125, 146, 255, .22);
+        --hero-gradient-end: rgba(18, 20, 32, .18);
+        --hero-orb: rgba(62, 207, 142, .16);
+        --toolbar-gradient-start: rgba(125, 146, 255, .15);
+        --toolbar-gradient-mid: rgba(125, 146, 255, .05);
+        --toolbar-glow: rgba(125, 146, 255, .12);
+        --toolbar-glow-secondary: rgba(62, 207, 142, .06);
+        --badge-folder-fg: #8fd8ff;
+        --badge-folder-bg: rgba(82, 184, 255, .13);
+        --badge-folder-border: rgba(143, 216, 255, .36);
+        --badge-file-fg: #aebcff;
+        --badge-file-bg: rgba(125, 146, 255, .13);
+        --badge-file-border: rgba(174, 188, 255, .36);
+        --badge-line-fg: #8ff0c6;
+        --badge-line-bg: rgba(62, 207, 142, .13);
+        --badge-line-border: rgba(143, 240, 198, .36);
+        --badge-pin-fg: #ffd166;
+        --badge-pin-bg: rgba(255, 209, 102, .13);
+        --badge-pin-border: rgba(255, 209, 102, .38);
+        --badge-missing-fg: #ff9cbb;
+        --badge-missing-bg: rgba(255, 122, 167, .12);
+        --badge-missing-border: rgba(255, 156, 187, .36);
+        --shadow-lg: 0 18px 40px rgba(0, 0, 0, .34);
+        --shadow-md: 0 10px 24px rgba(0, 0, 0, .24);
+      }
+
+      body.theme-light {
+        color-scheme: light;
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --panel-2: #f0f3fa;
+        --panel-3: #e6ebf5;
+        --border: rgba(53, 65, 101, .18);
+        --fg: #20263a;
+        --muted: #65708a;
+        --accent: #5269d8;
+        --accent-soft: rgba(82, 105, 216, .14);
+        --accent-fg: #ffffff;
+        --danger: #c93568;
+        --focus: #5269d8;
+        --page-glow-1: rgba(82, 105, 216, .13);
+        --page-glow-2: rgba(32, 148, 120, .07);
+        --hero-gradient-start: rgba(82, 105, 216, .14);
+        --hero-gradient-end: rgba(255,255,255,.72);
+        --hero-sheen-start: rgba(255,255,255,.86);
+        --hero-sheen-end: rgba(255,255,255,.58);
+        --hero-orb: rgba(82, 105, 216, .12);
+        --toolbar-gradient-start: rgba(82,105,216,.12);
+        --toolbar-gradient-mid: rgba(255,255,255,.72);
+        --toolbar-gradient-end: rgba(255,255,255,.52);
+        --toolbar-glow: rgba(82,105,216,.12);
+        --toolbar-glow-secondary: rgba(32,148,120,.05);
+        --badge-folder-fg: #075985;
+        --badge-folder-bg: rgba(14, 116, 144, .1);
+        --badge-folder-border: rgba(14, 116, 144, .28);
+        --badge-file-fg: #3f51b5;
+        --badge-file-bg: rgba(63, 81, 181, .1);
+        --badge-file-border: rgba(63, 81, 181, .28);
+        --badge-line-fg: #047857;
+        --badge-line-bg: rgba(4, 120, 87, .1);
+        --badge-line-border: rgba(4, 120, 87, .28);
+        --badge-pin-fg: #8a5a00;
+        --badge-pin-bg: rgba(180, 111, 0, .13);
+        --badge-pin-border: rgba(180, 111, 0, .3);
+        --badge-missing-fg: #b4232f;
+        --badge-missing-bg: rgba(180, 35, 47, .1);
+        --badge-missing-border: rgba(180, 35, 47, .3);
+        --shadow-lg: 0 18px 40px rgba(41, 49, 78, .16);
+        --shadow-md: 0 10px 24px rgba(41, 49, 78, .11);
+      }
+
+      body.theme-aurora {
+        color-scheme: dark;
+        --bg: #101827;
+        --panel: #1b2638;
+        --panel-2: #151f30;
+        --panel-3: #0d1421;
+        --border: rgba(216, 222, 233, .17);
+        --fg: #eceff4;
+        --muted: #a9b7cc;
+        --accent: #88c0d0;
+        --accent-soft: rgba(136, 192, 208, .18);
+        --accent-fg: #0d1421;
+        --success: #a3be8c;
+        --warning: #ebcb8b;
+        --danger: #bf616a;
+        --focus: #81a1c1;
+        --page-glow-1: rgba(94, 129, 172, .2);
+        --page-glow-2: rgba(136, 192, 208, .1);
+        --hero-gradient-start: rgba(94, 129, 172, .24);
+        --hero-gradient-end: rgba(13, 20, 33, .24);
+        --hero-orb: rgba(163, 190, 140, .16);
+        --toolbar-gradient-start: rgba(94, 129, 172, .18);
+        --toolbar-gradient-mid: rgba(136, 192, 208, .07);
+        --toolbar-glow: rgba(136, 192, 208, .12);
+        --toolbar-glow-secondary: rgba(163, 190, 140, .08);
+        --badge-folder-fg: #9ad7e4;
+        --badge-folder-bg: rgba(136, 192, 208, .13);
+        --badge-folder-border: rgba(154, 215, 228, .36);
+        --badge-file-fg: #b8c7e8;
+        --badge-file-bg: rgba(129, 161, 193, .13);
+        --badge-file-border: rgba(184, 199, 232, .34);
+        --badge-line-fg: #b7d99b;
+        --badge-line-bg: rgba(163, 190, 140, .13);
+        --badge-line-border: rgba(183, 217, 155, .36);
+        --badge-pin-fg: #f2cf8f;
+        --badge-pin-bg: rgba(235, 203, 139, .14);
+        --badge-pin-border: rgba(242, 207, 143, .36);
+        --badge-missing-fg: #e2838c;
+        --badge-missing-bg: rgba(191, 97, 106, .14);
+        --badge-missing-border: rgba(226, 131, 140, .36);
+        --shadow-lg: 0 18px 40px rgba(4, 9, 17, .38);
+        --shadow-md: 0 10px 24px rgba(4, 9, 17, .26);
+      }
+
+      body.theme-coffee {
+        color-scheme: dark;
+        --bg: #181825;
+        --panel: #242438;
+        --panel-2: #1e1e2e;
+        --panel-3: #11111b;
+        --border: rgba(205, 214, 244, .17);
+        --fg: #cdd6f4;
+        --muted: #a6adc8;
+        --accent: #cba6f7;
+        --accent-soft: rgba(203, 166, 247, .18);
+        --accent-fg: #1e1e2e;
+        --success: #a6e3a1;
+        --warning: #f9e2af;
+        --danger: #f38ba8;
+        --focus: #b4befe;
+        --page-glow-1: rgba(203, 166, 247, .18);
+        --page-glow-2: rgba(137, 220, 235, .08);
+        --hero-gradient-start: rgba(203, 166, 247, .2);
+        --hero-gradient-end: rgba(17, 17, 27, .24);
+        --hero-orb: rgba(166, 227, 161, .14);
+        --toolbar-gradient-start: rgba(203, 166, 247, .14);
+        --toolbar-gradient-mid: rgba(137, 180, 250, .06);
+        --toolbar-glow: rgba(203, 166, 247, .12);
+        --toolbar-glow-secondary: rgba(166, 227, 161, .06);
+        --badge-folder-fg: #89dceb;
+        --badge-folder-bg: rgba(137, 220, 235, .13);
+        --badge-folder-border: rgba(137, 220, 235, .36);
+        --badge-file-fg: #b4befe;
+        --badge-file-bg: rgba(180, 190, 254, .13);
+        --badge-file-border: rgba(180, 190, 254, .36);
+        --badge-line-fg: #a6e3a1;
+        --badge-line-bg: rgba(166, 227, 161, .13);
+        --badge-line-border: rgba(166, 227, 161, .36);
+        --badge-pin-fg: #f9e2af;
+        --badge-pin-bg: rgba(249, 226, 175, .14);
+        --badge-pin-border: rgba(249, 226, 175, .38);
+        --badge-missing-fg: #f38ba8;
+        --badge-missing-bg: rgba(243, 139, 168, .13);
+        --badge-missing-border: rgba(243, 139, 168, .36);
+        --shadow-lg: 0 18px 40px rgba(8, 8, 14, .42);
+        --shadow-md: 0 10px 24px rgba(8, 8, 14, .28);
+      }
+
+      body.theme-sunlit {
+        color-scheme: light;
+        --bg: #fdf6e3;
+        --panel: #fffaf0;
+        --panel-2: #eee8d5;
+        --panel-3: #e6dfc8;
+        --border: rgba(101, 123, 131, .26);
+        --fg: #073642;
+        --muted: #657b83;
+        --accent: #268bd2;
+        --accent-soft: rgba(38, 139, 210, .14);
+        --accent-fg: #ffffff;
+        --success: #859900;
+        --warning: #b58900;
+        --danger: #dc322f;
+        --focus: #268bd2;
+        --page-glow-1: rgba(38, 139, 210, .12);
+        --page-glow-2: rgba(133, 153, 0, .08);
+        --hero-gradient-start: rgba(38, 139, 210, .13);
+        --hero-gradient-end: rgba(253, 246, 227, .72);
+        --hero-sheen-start: rgba(255, 250, 240, .88);
+        --hero-sheen-end: rgba(255, 250, 240, .58);
+        --hero-orb: rgba(133, 153, 0, .12);
+        --toolbar-gradient-start: rgba(38, 139, 210, .11);
+        --toolbar-gradient-mid: rgba(253, 246, 227, .78);
+        --toolbar-gradient-end: rgba(253, 246, 227, .52);
+        --toolbar-glow: rgba(38, 139, 210, .11);
+        --toolbar-glow-secondary: rgba(133, 153, 0, .06);
+        --badge-folder-fg: #1f6f9f;
+        --badge-folder-bg: rgba(38, 139, 210, .1);
+        --badge-folder-border: rgba(38, 139, 210, .3);
+        --badge-file-fg: #4f63b5;
+        --badge-file-bg: rgba(79, 99, 181, .1);
+        --badge-file-border: rgba(79, 99, 181, .28);
+        --badge-line-fg: #5f7300;
+        --badge-line-bg: rgba(133, 153, 0, .13);
+        --badge-line-border: rgba(133, 153, 0, .32);
+        --badge-pin-fg: #8a5a00;
+        --badge-pin-bg: rgba(181, 137, 0, .14);
+        --badge-pin-border: rgba(181, 137, 0, .34);
+        --badge-missing-fg: #b8322f;
+        --badge-missing-bg: rgba(220, 50, 47, .1);
+        --badge-missing-border: rgba(220, 50, 47, .3);
+        --shadow-lg: 0 18px 40px rgba(101, 83, 22, .14);
+        --shadow-md: 0 10px 24px rgba(101, 83, 22, .1);
+      }
+
+      body.theme-clean {
+        color-scheme: light;
+        --bg: #ffffff;
+        --panel: #ffffff;
+        --panel-2: #f6f8fa;
+        --panel-3: #eaeef2;
+        --border: rgba(31, 35, 40, .15);
+        --fg: #24292f;
+        --muted: #57606a;
+        --accent: #0969da;
+        --accent-soft: rgba(9, 105, 218, .12);
+        --accent-fg: #ffffff;
+        --success: #1a7f37;
+        --warning: #9a6700;
+        --danger: #cf222e;
+        --focus: #0969da;
+        --page-glow-1: rgba(9, 105, 218, .1);
+        --page-glow-2: rgba(26, 127, 55, .05);
+        --hero-gradient-start: rgba(9, 105, 218, .11);
+        --hero-gradient-end: rgba(255, 255, 255, .78);
+        --hero-sheen-start: rgba(255,255,255,.94);
+        --hero-sheen-end: rgba(246,248,250,.72);
+        --hero-orb: rgba(26, 127, 55, .1);
+        --toolbar-gradient-start: rgba(9, 105, 218, .08);
+        --toolbar-gradient-mid: rgba(246,248,250,.84);
+        --toolbar-gradient-end: rgba(246,248,250,.62);
+        --toolbar-glow: rgba(9, 105, 218, .08);
+        --toolbar-glow-secondary: rgba(26, 127, 55, .04);
+        --badge-folder-fg: #0969da;
+        --badge-folder-bg: rgba(9, 105, 218, .09);
+        --badge-folder-border: rgba(9, 105, 218, .28);
+        --badge-file-fg: #4d5bd1;
+        --badge-file-bg: rgba(77, 91, 209, .09);
+        --badge-file-border: rgba(77, 91, 209, .28);
+        --badge-line-fg: #1a7f37;
+        --badge-line-bg: rgba(26, 127, 55, .1);
+        --badge-line-border: rgba(26, 127, 55, .3);
+        --badge-pin-fg: #9a6700;
+        --badge-pin-bg: rgba(154, 103, 0, .12);
+        --badge-pin-border: rgba(154, 103, 0, .3);
+        --badge-missing-fg: #cf222e;
+        --badge-missing-bg: rgba(207, 34, 46, .09);
+        --badge-missing-border: rgba(207, 34, 46, .3);
+        --shadow-lg: 0 18px 40px rgba(31, 35, 40, .12);
+        --shadow-md: 0 10px 24px rgba(31, 35, 40, .08);
+      }
+
+      body.theme-purple {
+        color-scheme: dark;
+        --bg: #120f1f;
+        --panel: #211a35;
+        --panel-2: #191328;
+        --panel-3: #0e0a19;
+        --border: rgba(232, 213, 255, .18);
+        --fg: #f4edff;
+        --muted: #b9a7d8;
+        --accent: #bd7cff;
+        --accent-soft: rgba(189, 124, 255, .2);
+        --accent-fg: #140d22;
+        --success: #75f0c0;
+        --warning: #ffd166;
+        --danger: #ff76a8;
+        --focus: #d6a7ff;
+        --page-glow-1: rgba(189, 124, 255, .22);
+        --page-glow-2: rgba(117, 240, 192, .08);
+        --hero-gradient-start: rgba(189, 124, 255, .24);
+        --hero-gradient-end: rgba(20, 13, 34, .28);
+        --hero-orb: rgba(117, 240, 192, .14);
+        --toolbar-gradient-start: rgba(189, 124, 255, .18);
+        --toolbar-gradient-mid: rgba(255, 118, 168, .06);
+        --toolbar-glow: rgba(189, 124, 255, .14);
+        --toolbar-glow-secondary: rgba(117, 240, 192, .06);
+        --badge-folder-fg: #8bd9ff;
+        --badge-folder-bg: rgba(139, 217, 255, .13);
+        --badge-folder-border: rgba(139, 217, 255, .36);
+        --badge-file-fg: #d2b3ff;
+        --badge-file-bg: rgba(189, 124, 255, .14);
+        --badge-file-border: rgba(210, 179, 255, .36);
+        --badge-line-fg: #75f0c0;
+        --badge-line-bg: rgba(117, 240, 192, .13);
+        --badge-line-border: rgba(117, 240, 192, .36);
+        --badge-pin-fg: #ffd166;
+        --badge-pin-bg: rgba(255, 209, 102, .14);
+        --badge-pin-border: rgba(255, 209, 102, .38);
+        --badge-missing-fg: #ff8eb8;
+        --badge-missing-bg: rgba(255, 118, 168, .13);
+        --badge-missing-border: rgba(255, 142, 184, .36);
+        --shadow-lg: 0 18px 40px rgba(6, 3, 14, .46);
+        --shadow-md: 0 10px 24px rgba(6, 3, 14, .3);
+      }
+
+      body.theme-contrast {
+        color-scheme: dark;
+        --bg: #000000;
+        --panel: #101010;
+        --panel-2: #080808;
+        --panel-3: #000000;
+        --border: rgba(255, 255, 255, .5);
+        --fg: #ffffff;
+        --muted: #d7d7d7;
+        --accent: #ffff00;
+        --accent-soft: rgba(255, 255, 0, .2);
+        --accent-fg: #000000;
+        --success: #00ff87;
+        --warning: #ffff00;
+        --danger: #ff5c8a;
+        --focus: #ffff00;
+        --page-glow-1: rgba(255, 255, 0, .12);
+        --page-glow-2: rgba(0, 255, 135, .08);
+        --hero-gradient-start: rgba(255, 255, 0, .12);
+        --hero-gradient-end: rgba(0, 0, 0, .4);
+        --hero-sheen-start: rgba(255,255,255,.08);
+        --hero-sheen-end: rgba(255,255,255,.02);
+        --hero-orb: rgba(255, 255, 0, .14);
+        --toolbar-gradient-start: rgba(255, 255, 0, .1);
+        --toolbar-gradient-mid: rgba(255,255,255,.04);
+        --toolbar-gradient-end: rgba(0,0,0,.02);
+        --toolbar-glow: rgba(255, 255, 0, .1);
+        --toolbar-glow-secondary: rgba(0, 255, 135, .06);
+        --badge-folder-fg: #00d7ff;
+        --badge-folder-bg: #001f29;
+        --badge-folder-border: #00d7ff;
+        --badge-file-fg: #a8b6ff;
+        --badge-file-bg: #111538;
+        --badge-file-border: #a8b6ff;
+        --badge-line-fg: #00ff87;
+        --badge-line-bg: #002918;
+        --badge-line-border: #00ff87;
+        --badge-pin-fg: #ffff00;
+        --badge-pin-bg: #2b2b00;
+        --badge-pin-border: #ffff00;
+        --badge-missing-fg: #ff7aa7;
+        --badge-missing-bg: #2b0011;
+        --badge-missing-border: #ff7aa7;
+        --shadow-lg: 0 18px 40px rgba(0, 0, 0, .72);
+        --shadow-md: 0 10px 24px rgba(0, 0, 0, .56);
+      }
+
+      body.theme-light .hero {
+        background:
+          linear-gradient(165deg, rgba(82, 105, 216, .14), rgba(255,255,255,.72)),
+          linear-gradient(180deg, rgba(255,255,255,.86), rgba(255,255,255,.58));
+      }
+
+      body.theme-light .toolbar-card {
+        background:
+          linear-gradient(180deg, rgba(82,105,216,.12), rgba(255,255,255,.72) 42%, rgba(255,255,255,.52)),
+          linear-gradient(180deg, rgba(255,255,255,.88), rgba(255,255,255,.7));
+      }
+
+      body.theme-light .toolbar-card,
+      body.theme-light .empty,
+      body.theme-light .section {
+        box-shadow: var(--shadow-md);
+      }
+
+      body.theme-light .stat {
+        border-color: rgba(53,65,101,.12);
+        background: rgba(255,255,255,.56);
+      }
+
+      body.theme-light .hero-toggle,
+      body.theme-light .action,
+      body.theme-light .chip,
+      body.theme-light .pill,
+      body.theme-light .section-sort,
+      body.theme-light .section-menu,
+      body.theme-light .bookmark-menu,
+      body.theme-light .bookmark-shift {
+        border-color: rgba(53,65,101,.18);
+        background: rgba(255,255,255,.62);
+      }
+
+      body.theme-light .context-menu button:hover,
+      body.theme-light .inline-menu button:hover,
+      body.theme-light .overlay-menu button:hover,
+      body.theme-sunlit .context-menu button:hover,
+      body.theme-sunlit .inline-menu button:hover,
+      body.theme-sunlit .overlay-menu button:hover,
+      body.theme-clean .context-menu button:hover,
+      body.theme-clean .inline-menu button:hover,
+      body.theme-clean .overlay-menu button:hover {
+        background: rgba(53,65,101,.07);
       }
 
       button, input {
@@ -307,6 +808,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
 
       .app {
         padding: 14px;
+        width: 100%;
         display: grid;
         gap: 14px;
         animation: fadeUp .22s ease-out;
@@ -319,8 +821,8 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         border-radius: var(--radius-xl);
         border: 1px solid var(--border);
         background:
-          linear-gradient(165deg, rgba(102, 125, 255, 0.22), rgba(12, 14, 27, 0.14)),
-          linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01));
+          linear-gradient(165deg, var(--hero-gradient-start), var(--hero-gradient-end)),
+          linear-gradient(180deg, var(--hero-sheen-start), var(--hero-sheen-end));
         box-shadow: var(--shadow-lg);
       }
 
@@ -331,7 +833,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         width: 180px;
         height: 180px;
         border-radius: 999px;
-        background: radial-gradient(circle, rgba(62, 207, 142, 0.18), transparent 68%);
+        background: radial-gradient(circle, var(--hero-orb), transparent 68%);
         pointer-events: none;
       }
 
@@ -348,9 +850,8 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
 
       .hero-top {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        align-items: start;
-        gap: 10px;
+        grid-template-columns: 1fr;
+        gap: 8px;
       }
 
       .hero-copy {
@@ -361,10 +862,9 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         display: flex;
         align-items: center;
         gap: 6px;
-        flex-wrap: nowrap;
-        justify-content: flex-end;
-        justify-self: end;
-        flex-shrink: 0;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        min-width: 0;
       }
 
       h1 {
@@ -372,29 +872,13 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         font-size: 17px;
         letter-spacing: -0.02em;
         line-height: 1.15;
-      }
-
-      .subtitle {
-        margin-top: 6px;
-        max-width: 32ch;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .workspace-pill {
-        border: 1px solid rgba(255,255,255,.08);
-        background: rgba(255,255,255,.06);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
-        min-height: 24px;
-        padding: 0 8px;
-        font-size: 11px;
         white-space: nowrap;
-        flex-shrink: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
-      .locale-toggle {
+      .hero-toggle {
         min-height: 24px;
-        min-width: 62px;
         padding: 0 8px;
         border-radius: 999px;
         border: 1px solid rgba(255,255,255,.08);
@@ -407,10 +891,90 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         flex-shrink: 0;
       }
 
-      .locale-toggle:hover {
+      .theme-control {
+        position: relative;
+        flex: 0 0 auto;
+      }
+
+      .hero-icon-toggle {
+        width: 26px;
+        min-width: 26px;
+        padding: 0;
+        font-size: 14px;
+      }
+
+      .feedback-toggle {
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .quick-tooltip {
+        position: fixed;
+        z-index: 240;
+        max-width: 220px;
+        padding: 5px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: color-mix(in srgb, var(--bg) 88%, black 12%);
+        color: var(--fg);
+        box-shadow: var(--shadow-md);
+        font-size: 11px;
+        line-height: 1.3;
+        white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(2px);
+        transition: opacity .08s ease, transform .08s ease;
+      }
+
+      .quick-tooltip.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .hero-toggle:hover {
         transform: translateY(-1px);
         filter: brightness(1.05);
       }
+
+      .theme-menu {
+        position: fixed;
+        top: auto;
+        right: auto;
+        left: auto;
+        z-index: 120;
+        min-width: 174px;
+      }
+
+      .theme-menu button {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .theme-menu button.is-active {
+        background: rgba(109,141,255,.14);
+        color: var(--fg);
+      }
+
+      .theme-swatch {
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,.24);
+        box-shadow: inset 0 0 0 1px rgba(0,0,0,.1);
+        flex: 0 0 auto;
+      }
+
+      .theme-swatch.system { background: conic-gradient(#7d92ff 0 25%, #f5f7fb 0 50%, #141520 0 75%, #88c0d0 0); }
+      .theme-swatch.dark { background: linear-gradient(135deg, #141520 0 48%, #7d92ff 48%); }
+      .theme-swatch.light { background: linear-gradient(135deg, #f5f7fb 0 48%, #5269d8 48%); }
+      .theme-swatch.aurora { background: linear-gradient(135deg, #101827 0 48%, #88c0d0 48%); }
+      .theme-swatch.coffee { background: linear-gradient(135deg, #181825 0 48%, #cba6f7 48%); }
+      .theme-swatch.sunlit { background: linear-gradient(135deg, #fdf6e3 0 48%, #268bd2 48%); }
+      .theme-swatch.clean { background: linear-gradient(135deg, #ffffff 0 48%, #0969da 48%); }
+      .theme-swatch.purple { background: linear-gradient(135deg, #120f1f 0 48%, #bd7cff 48%); }
+      .theme-swatch.contrast { background: linear-gradient(135deg, #000000 0 48%, #ffff00 48%); }
 
       .stats {
         display: grid;
@@ -456,7 +1020,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         gap: 12px;
         border-color: color-mix(in srgb, var(--border) 78%, rgba(109,141,255,.28));
         background:
-          linear-gradient(180deg, rgba(109,141,255,.16), rgba(109,141,255,.05) 38%, rgba(255,255,255,.02)),
+          linear-gradient(180deg, var(--toolbar-gradient-start), var(--toolbar-gradient-mid) 38%, var(--toolbar-gradient-end)),
           linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
         box-shadow: inset 0 1px 0 rgba(255,255,255,.05), var(--shadow-md);
       }
@@ -467,8 +1031,8 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         inset: 0;
         pointer-events: none;
         background:
-          radial-gradient(circle at top right, rgba(109, 141, 255, 0.14), transparent 36%),
-          radial-gradient(circle at bottom left, rgba(62, 207, 142, 0.06), transparent 28%);
+          radial-gradient(circle at top right, var(--toolbar-glow), transparent 36%),
+          radial-gradient(circle at bottom left, var(--toolbar-glow-secondary), transparent 28%);
         opacity: .95;
       }
 
@@ -485,7 +1049,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         position: relative;
         z-index: 1;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-columns: 1fr;
         gap: 8px;
         align-items: center;
       }
@@ -497,7 +1061,12 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       }
 
       .toolbar-primary {
+        display: none;
         position: relative;
+      }
+
+      #btn-clean-missing {
+        width: 100%;
       }
 
       .action {
@@ -555,8 +1124,8 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       .action:focus-visible,
       .chip:focus-visible,
       .bookmark-menu:focus-visible,
-      .locale-toggle:focus-visible,
-      .section-toggle:focus-visible,
+      .hero-toggle:focus-visible,
+      .section-chevron:focus-visible,
       .search-input:focus-visible {
         outline: 1px solid var(--focus);
         outline-offset: 2px;
@@ -665,11 +1234,57 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       .section-title {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 2px;
         font-size: 12px;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: .06em;
+      }
+
+      .section-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .section-chevron {
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex: 0 0 auto;
+        line-height: 1;
+        font-size: 0;
+        opacity: .92;
+      }
+
+      .section-chevron::before {
+        content: "";
+        width: 0;
+        height: 0;
+        border-style: solid;
+        border-width: 4px 0 4px 5px;
+        border-color: transparent transparent transparent currentColor;
+        transform: rotate(90deg);
+        transition: transform .12s ease;
+      }
+
+      .section-chevron[data-collapsed="true"]::before {
+        transform: rotate(0deg);
+      }
+
+      .section-header[data-group-header-toggle]:hover .section-chevron {
+        color: var(--fg);
+      }
+
+      .section-header[data-group-header-toggle] .section-title-wrap {
+        cursor: pointer;
       }
 
       .section-subtitle {
@@ -679,30 +1294,32 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       }
 
       .section-meta {
-        display: grid;
-        grid-auto-flow: column;
-        grid-auto-columns: max-content;
+        display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         flex-shrink: 0;
         justify-content: end;
       }
 
       .pill {
-        min-height: 22px;
-        min-width: 50px;
+        box-sizing: border-box;
+        min-height: 28px;
+        min-width: 52px;
         padding: 0 8px;
         border-radius: 999px;
         border: 1px solid var(--border);
+        background: rgba(255,255,255,.03);
+        color: var(--muted);
         display: inline-flex;
         align-items: center;
         justify-content: center;
         white-space: nowrap;
         font-size: 11px;
+        font-weight: 700;
+        line-height: 1;
       }
 
       .section-sort,
-      .section-toggle,
       .section-menu,
       .bookmark-menu,
       .bookmark-shift {
@@ -714,8 +1331,20 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         transition: transform .14s ease, filter .14s ease, background .14s ease;
       }
 
+      .section-control {
+        box-sizing: border-box;
+        height: 28px;
+        min-height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        white-space: nowrap;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
       .section-sort,
-      .section-toggle,
       .section-menu,
       .bookmark-menu,
       .bookmark-shift {
@@ -724,18 +1353,19 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         padding: 0 10px;
       }
 
-      .section-sort,
-      .section-toggle {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
+      .section-sort {
         color: var(--muted);
         min-width: 52px;
         padding: 0 8px;
-        white-space: nowrap;
         text-align: center;
-        line-height: 1;
         flex-shrink: 0;
+      }
+
+      .section-menu {
+        width: 30px;
+        min-width: 30px;
+        padding: 0;
+        color: var(--muted);
       }
 
       .section-header.is-draggable {
@@ -750,6 +1380,10 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         box-shadow: inset 0 0 0 1px rgba(109,141,255,.34);
       }
 
+      .section-bookmark-drop-target {
+        box-shadow: inset 0 0 0 1px rgba(109,141,255,.52);
+      }
+
       .section-list {
         display: grid;
         gap: 8px;
@@ -762,12 +1396,14 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
 
       .bookmark {
         display: grid;
-        grid-template-columns: 1fr auto;
+        grid-template-columns: minmax(0, 1fr);
         gap: 10px;
         padding: 12px;
+        padding-right: 54px;
         border-radius: var(--radius-lg);
         border: 1px solid rgba(255,255,255,.05);
         background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
+        position: relative;
         transform-origin: top center;
         animation: fadeUp .18s ease-out;
         cursor: pointer;
@@ -788,6 +1424,23 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         animation: bookmarkPulse 1.4s ease-out;
       }
 
+      .bookmark.is-draggable {
+        cursor: grab;
+      }
+
+      .bookmark.is-dragging {
+        opacity: .56;
+        cursor: grabbing;
+      }
+
+      .bookmark.is-drop-before {
+        box-shadow: inset 0 2px 0 rgba(109,141,255,.82);
+      }
+
+      .bookmark.is-drop-after {
+        box-shadow: inset 0 -2px 0 rgba(109,141,255,.82);
+      }
+
       .bookmark-main {
         min-width: 0;
       }
@@ -797,10 +1450,6 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       }
 
       .bookmark.compact .bookmark-path {
-        margin-top: 4px;
-      }
-
-      .bookmark.compact .bookmark-line {
         margin-top: 4px;
       }
 
@@ -890,43 +1539,58 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
 
       .type-badge,
       .status-badge,
-      .pin-badge {
+      .pin-badge,
+      .line-badge {
         min-height: 20px;
         padding: 0 8px;
         border-radius: 999px;
         display: inline-flex;
         align-items: center;
         font-size: 11px;
+        font-weight: 700;
+        line-height: 1;
         border: 1px solid var(--border);
       }
 
-      .type-badge.folder { color: #86d1ff; }
-      .type-badge.file { color: #9db2ff; }
-      .type-badge.line { color: #9bf0c9; }
+      .type-badge.folder {
+        color: var(--badge-folder-fg);
+        border-color: var(--badge-folder-border);
+        background: var(--badge-folder-bg);
+      }
+
+      .type-badge.file {
+        color: var(--badge-file-fg);
+        border-color: var(--badge-file-border);
+        background: var(--badge-file-bg);
+      }
+
+      .type-badge.line {
+        color: var(--badge-line-fg);
+        border-color: var(--badge-line-border);
+        background: var(--badge-line-bg);
+      }
 
       .status-badge.missing {
-        color: #ff9c9c;
-        border-color: rgba(255,156,156,.28);
-        background: rgba(255,80,80,.08);
+        color: var(--badge-missing-fg);
+        border-color: var(--badge-missing-border);
+        background: var(--badge-missing-bg);
       }
 
       .pin-badge {
-        color: #ffd56a;
-        border-color: rgba(255,213,106,.26);
-        background: rgba(255,213,106,.08);
+        color: var(--badge-pin-fg);
+        border-color: var(--badge-pin-border);
+        background: var(--badge-pin-bg);
+      }
+
+      .line-badge {
+        color: var(--muted);
+        background: rgba(255,255,255,.025);
       }
 
       .bookmark-path {
         margin-top: 6px;
         color: var(--muted);
         word-break: break-word;
-      }
-
-      .bookmark-line {
-        margin-top: 6px;
-        color: var(--muted);
-        font-size: 12px;
-        white-space: nowrap;
       }
 
       .bookmark-meta {
@@ -943,12 +1607,14 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       .bookmark-actions {
         display: flex;
         align-items: flex-start;
+        position: absolute;
+        top: 12px;
+        right: 12px;
         gap: 6px;
       }
 
       .bookmark-menu,
-      .bookmark-shift,
-      .section-menu {
+      .bookmark-shift {
         min-height: 30px;
         min-width: 30px;
         padding: 0 10px;
@@ -991,8 +1657,30 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         background: rgba(255,255,255,.06);
       }
 
+      .context-menu button:disabled {
+        color: var(--muted);
+        cursor: not-allowed;
+        opacity: .55;
+      }
+
+      .context-menu button:disabled:hover {
+        background: transparent;
+      }
+
       .context-menu button.danger {
         color: var(--danger);
+      }
+
+      .context-submenu {
+        display: none;
+        margin: 2px 0 2px 10px;
+        padding: 4px 0 4px 8px;
+        border-left: 1px solid var(--border);
+      }
+
+      .context-submenu.visible {
+        display: grid;
+        gap: 2px;
       }
 
       .inline-menu {
@@ -1086,9 +1774,208 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       }
 
       .footer-tip {
+        display: none;
         text-align: center;
         font-size: 12px;
         padding-bottom: 8px;
+      }
+
+      body.is-compact {
+        --sidebar-min-width: 304px;
+      }
+
+      body.is-compact .app {
+        padding: 8px;
+        gap: 8px;
+      }
+
+      body.is-compact .hero,
+      body.is-compact .toolbar-card,
+      body.is-compact .section,
+      body.is-compact .empty {
+        border-radius: var(--radius-sm);
+        box-shadow: none;
+      }
+
+      body.is-compact .hero {
+        padding: 10px 12px;
+      }
+
+      body.is-compact .hero::after,
+      body.is-compact .stats,
+      body.is-compact .footer-tip {
+        display: none;
+      }
+
+      body.is-compact .eyebrow {
+        display: none;
+      }
+
+      body.is-compact h1 {
+        margin: 1px 0 0;
+        font-size: 13px;
+        line-height: 1.2;
+      }
+
+      body.is-compact .hero-top {
+        gap: 7px;
+      }
+
+      body.is-compact .title-actions {
+        gap: 5px;
+      }
+
+      body.is-compact .hero-toggle {
+        min-height: 22px;
+        padding: 0 7px;
+        font-size: 11px;
+      }
+
+      body.is-compact .toolbar-card {
+        padding: 8px;
+        gap: 8px;
+      }
+
+      body.is-compact .toolbar-card::before {
+        opacity: .45;
+      }
+
+      body.is-compact .action {
+        min-height: 30px;
+        padding: 0 10px;
+        gap: 6px;
+      }
+
+      body.is-compact .search-row {
+        gap: 6px;
+      }
+
+      body.is-compact .search-input {
+        min-height: 30px;
+        padding: 0 10px;
+      }
+
+      body.is-compact .chips {
+        gap: 4px;
+      }
+
+      body.is-compact .chip {
+        min-height: 24px;
+        padding: 0 8px;
+        font-size: 11px;
+      }
+
+      body.is-compact .sections {
+        gap: 6px;
+      }
+
+      body.is-compact .section-header {
+        padding: 6px 10px 6px 6px;
+        gap: 6px;
+      }
+
+      body.is-compact .section-title {
+        gap: 2px;
+        font-size: 11px;
+      }
+
+      body.is-compact .section-meta {
+        gap: 4px;
+      }
+
+      body.is-compact .pill {
+        min-height: 24px;
+        min-width: 44px;
+        padding: 0 6px;
+        font-size: 10px;
+      }
+
+      body.is-compact .section-control {
+        height: 24px;
+        min-height: 24px;
+        font-size: 10px;
+      }
+
+      body.is-compact .section-sort,
+      body.is-compact .section-menu,
+      body.is-compact .bookmark-menu,
+      body.is-compact .bookmark-shift {
+        min-height: 24px;
+        min-width: 24px;
+        padding: 0 6px;
+        font-size: 11px;
+      }
+
+      body.is-compact .section-sort {
+        min-width: 44px;
+      }
+
+      body.is-compact .section-menu {
+        width: 24px;
+        padding: 0;
+      }
+
+      body.is-compact .section-meta .section-control {
+        font-size: 10px;
+      }
+
+      body.is-compact .section-list {
+        gap: 4px;
+        padding: 0 6px 6px;
+      }
+
+      body.is-compact .bookmark {
+        gap: 6px;
+        padding: 7px 8px;
+        padding-right: 38px;
+        border-radius: 8px;
+      }
+
+      body.is-compact .bookmark-label {
+        font-size: 12px;
+        line-height: 1.25;
+      }
+
+      body.is-compact .bookmark-tags {
+        gap: 4px;
+        margin-top: 4px;
+        min-height: 16px;
+      }
+
+      body.is-compact .type-badge,
+      body.is-compact .status-badge,
+      body.is-compact .pin-badge,
+      body.is-compact .line-badge {
+        min-height: 16px;
+        padding: 0 5px;
+        font-size: 10px;
+      }
+
+      body.is-compact .bookmark-path {
+        margin-top: 3px;
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      body.is-compact .bookmark-actions {
+        position: absolute;
+        top: 7px;
+        right: 7px;
+        gap: 0;
+      }
+
+      body.is-compact .bookmark-menu {
+        width: 24px;
+        min-width: 24px;
+        min-height: 24px;
+        padding: 0;
+        font-size: 11px;
+      }
+
+      body.is-compact .bookmark-shift {
+        display: none;
       }
 
       @media (max-width: 320px) {
@@ -1116,7 +2003,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
 
         .bookmark-actions {
           justify-content: flex-end;
-          padding-top: 2px;
+          padding-top: 0;
         }
 
         .bookmark-main {
@@ -1179,14 +2066,17 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         <div class="hero-top">
           <div class="hero-copy">
             <div class="eyebrow">JumpJump Workspace</div>
-            <h1 id="hero-title">仓库导航工作台</h1>
+            <h1 id="hero-title">导航</h1>
           </div>
           <div class="title-actions">
-            <button id="locale-toggle" class="locale-toggle">English</button>
-            <span class="pill workspace-pill" id="workspace-name">-</span>
+            <button id="compact-toggle" class="hero-toggle" aria-pressed="false">紧凑</button>
+            <button id="locale-toggle" class="hero-toggle">English</button>
+            <div class="theme-control">
+              <button id="theme-toggle" class="hero-toggle hero-icon-toggle" type="button" aria-haspopup="menu" aria-expanded="false">◐</button>
+            </div>
+            <button id="feedback-toggle" class="hero-toggle hero-icon-toggle feedback-toggle" type="button">?</button>
           </div>
         </div>
-        <div id="hero-subtitle" class="subtitle">把最常跳的目录、文件和代码位置整理成一套可点击、可筛选、可维护的捷径系统。</div>
         <div class="stats">
           <div class="stat"><div id="label-total" class="stat-label">总书签</div><div class="stat-value" id="stat-total">0</div></div>
           <div class="stat"><div id="label-pinned" class="stat-label">置顶</div><div class="stat-value" id="stat-pinned">0</div></div>
@@ -1248,7 +2138,10 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       <div id="context-menu" class="context-menu">
         <button data-menu-action="open">打开</button>
         <button data-menu-action="pin">置顶</button>
+        <button data-menu-action="move-up">上移</button>
+        <button data-menu-action="move-down">下移</button>
         <button data-menu-action="move-group">移动到分组</button>
+        <div id="move-group-submenu" class="context-submenu"></div>
         <button data-menu-action="rename">改名</button>
         <button class="danger" data-menu-action="delete">删掉</button>
       </div>
@@ -1260,6 +2153,9 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       </div>
 
       <div id="picker-menu" class="overlay-menu"></div>
+      <div id="theme-menu" class="inline-menu theme-menu" role="menu">
+      </div>
+      <div id="quick-tooltip" class="quick-tooltip" role="tooltip"></div>
 
       <div id="footer-tip" class="footer-tip">提示：置顶负责“长期常用”，最近访问负责“当前上下文”，分组负责“结构化管理”。</div>
     </div>
@@ -1272,11 +2168,17 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         query: persisted.query || "",
         filter: persisted.filter || "all",
         contextMenu: { visible: false, bookmarkId: null, x: 0, y: 0 },
+        contextMoveGroupExpanded: false,
         groupMenu: { visible: false, groupId: null, x: 0, y: 0 },
         pickerMenu: { visible: false, mode: null, x: 0, y: 0, bookmarkId: null, groupId: null },
         editingBookmarkId: null,
         editingValue: "",
         draggingGroupId: null,
+        draggingBookmarkId: null,
+        draggingBookmarkGroupId: null,
+        bookmarkDropGroupId: null,
+        suppressNextOpen: false,
+        suppressNextGroupToggle: false,
         groupFormVisible: false,
         groupFormMode: "create",
         editingGroupId: null
@@ -1287,6 +2189,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       const searchInput = document.getElementById("search-input");
       const chips = Array.from(document.querySelectorAll(".chip"));
       const contextMenuEl = document.getElementById("context-menu");
+      const moveGroupSubmenuEl = document.getElementById("move-group-submenu");
       const groupMenuEl = document.getElementById("group-menu");
       const pickerMenuEl = document.getElementById("picker-menu");
       const addMenuEl = document.getElementById("add-menu");
@@ -1295,13 +2198,31 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       const createGroupSaveEl = document.getElementById("create-group-save");
       const createGroupCancelEl = document.getElementById("create-group-cancel");
       const localeToggleEl = document.getElementById("locale-toggle");
+      const compactToggleEl = document.getElementById("compact-toggle");
+      const themeToggleEl = document.getElementById("theme-toggle");
+      const themeMenuEl = document.getElementById("theme-menu");
+      const feedbackToggleEl = document.getElementById("feedback-toggle");
+      const quickTooltipEl = document.getElementById("quick-tooltip");
+      let quickTooltipTimer = 0;
       searchInput.value = state.query;
 
       const i18n = {
         zh: {
-          languageToggle: "English",
-          heroTitle: "仓库导航工作台",
-          heroSubtitle: "把最常跳的目录、文件和代码位置整理成一套可点击、可筛选、可维护的捷径系统。",
+          languageCurrent: "语言：中文",
+          compactStandard: "模式：标准",
+          compactCompact: "模式：紧凑",
+          heroTitle: "导航",
+          themeLabel: "切换主题",
+          themeSystem: "跟随编辑器",
+          themeDark: "深色",
+          themeLight: "浅色",
+          themeAurora: "极光",
+          themeCoffee: "咖啡",
+          themeSunlit: "日光",
+          themeClean: "清爽浅色",
+          themePurple: "紫夜",
+          themeContrast: "高对比度",
+          feedbackLabel: "反馈问题",
           total: "总书签",
           pinned: "置顶",
           missing: "失效路径",
@@ -1356,17 +2277,29 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
           collapse: "收起",
           sortManual: "手动",
           sortLabel: "名称",
-          sortCreatedAt: "添加时间",
-          sortUpdatedAt: "修改时间",
+          sortCreatedAt: "最近添加",
+          sortUpdatedAt: "最近修改",
           sortType: "类型",
           moveUp: "上移",
           moveDown: "下移",
           emptyGroup: "这个分组还没有书签。"
         },
         en: {
-          languageToggle: "中文",
-          heroTitle: "Repository Navigator",
-          heroSubtitle: "Turn your most-used folders, files, and code locations into a clickable, filterable, maintainable shortcut system.",
+          languageCurrent: "English",
+          compactStandard: "Standard",
+          compactCompact: "Compact",
+          heroTitle: "Navigator",
+          themeLabel: "Switch Theme",
+          themeSystem: "Follow Editor",
+          themeDark: "Dark",
+          themeLight: "Light",
+          themeAurora: "Aurora",
+          themeCoffee: "Coffee",
+          themeSunlit: "Sunlit",
+          themeClean: "Clean Light",
+          themePurple: "Purple Night",
+          themeContrast: "High Contrast",
+          feedbackLabel: "Send Feedback",
           total: "Bookmarks",
           pinned: "Pinned",
           missing: "Missing",
@@ -1421,14 +2354,26 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
           collapse: "Collapse",
           sortManual: "Manual",
           sortLabel: "Label",
-          sortCreatedAt: "Created",
-          sortUpdatedAt: "Updated",
+          sortCreatedAt: "Recently Added",
+          sortUpdatedAt: "Recently Updated",
           sortType: "Type",
           moveUp: "Up",
           moveDown: "Down",
           emptyGroup: "This group does not have any bookmarks yet."
         }
       };
+
+      const themeOptions = [
+        { id: "system", labelKey: "themeSystem" },
+        { id: "dark", labelKey: "themeDark" },
+        { id: "light", labelKey: "themeLight" },
+        { id: "aurora", labelKey: "themeAurora" },
+        { id: "coffee", labelKey: "themeCoffee" },
+        { id: "purple", labelKey: "themePurple" },
+        { id: "contrast", labelKey: "themeContrast" },
+        { id: "sunlit", labelKey: "themeSunlit" },
+        { id: "clean", labelKey: "themeClean" }
+      ];
 
       function persist() {
         vscode.setState({
@@ -1456,6 +2401,26 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         if (filter === "line") return dict.searchPlaceholderLine;
         if (filter === "missing") return dict.searchPlaceholderMissing;
         return dict.searchPlaceholder;
+      }
+
+      function themeText(dict, themeMode) {
+        if (themeMode === "dark") return dict.themeDark;
+        if (themeMode === "light") return dict.themeLight;
+        if (themeMode === "aurora") return dict.themeAurora;
+        if (themeMode === "coffee") return dict.themeCoffee;
+        if (themeMode === "purple") return dict.themePurple;
+        if (themeMode === "contrast") return dict.themeContrast;
+        if (themeMode === "sunlit") return dict.themeSunlit;
+        if (themeMode === "clean") return dict.themeClean;
+        return dict.themeSystem;
+      }
+
+      function applyThemeMode(themeMode) {
+        themeOptions.forEach((option) => {
+          if (option.id !== "system") {
+            document.body.classList.toggle("theme-" + option.id, themeMode === option.id);
+          }
+        });
       }
 
       function matches(item, section) {
@@ -1488,16 +2453,18 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
 
       function renderSection(section) {
         const dict = i18n[state.data?.locale || "zh"];
-        const collapsed = section.collapsed === true;
-        const items = section.items.filter((item) => matches(item, section));
-        if (items.length === 0 && (state.query || state.filter !== "all")) return "";
-        const compact = section.density === "compact";
+	        const collapsed = section.collapsed === true;
+	        const items = section.items.filter((item) => matches(item, section));
+	        if (section.system && section.items.length === 0 && !state.query && state.filter === "all") return "";
+	        if (items.length === 0 && (state.query || state.filter !== "all")) return "";
+        const compact = state.data?.compactMode === true || section.density === "compact";
         const manualSort = section.sortBy === "manual";
+        const dragSortEnabled = !state.query.trim() && state.filter === "all";
 
         const toneClass = section.tone === "accent" ? "accent" : section.tone === "warning" ? "warning" : "";
         const rows = items.map((item) => {
           const pathText = item.path;
-          const lineText = item.type === "line" && item.line ? "第 " + item.line + " 行" : "";
+          const lineBadgeText = item.type === "line" && item.line ? "L" + item.line : "";
           const isEditing = state.editingBookmarkId === item.id;
           const labelArea = isEditing
             ? \`
@@ -1513,44 +2480,49 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
                     <button class="rename-button" data-inline-action="cancel-rename" data-bookmark-id="\${item.id}">\${dict.cancel}</button>
                   </div>
                 </div>
-              \`
-            : '<div class="bookmark-label">' + escapeHtml(item.label) + "</div>";
+	              \`
+	            : '<div class="bookmark-label">' + escapeHtml(item.label) + "</div>";
+          const dragAttributes = dragSortEnabled
+            ? ' draggable="true" data-draggable-bookmark="' + item.id + '" data-bookmark-group="' + section.groupId + '"'
+            : "";
           return \`
-            <article class="bookmark \${compact ? "compact" : ""} \${item.missing ? "is-missing" : ""} \${item.pinned ? "is-pinned" : ""} \${state.data.highlightedBookmarkId === item.id ? "is-highlighted" : ""}" data-open="\${item.id}" data-bookmark-id="\${item.id}">
+            <article class="bookmark \${compact ? "compact" : ""} \${dragSortEnabled ? "is-draggable" : ""} \${state.draggingBookmarkId === item.id ? "is-dragging" : ""} \${item.missing ? "is-missing" : ""} \${item.pinned ? "is-pinned" : ""} \${state.data.highlightedBookmarkId === item.id ? "is-highlighted" : ""}" data-open="\${item.id}" data-bookmark-id="\${item.id}" data-bookmark-group="\${section.groupId}"\${dragAttributes}>
               <div class="bookmark-main">
                 <div class="bookmark-head">
                   <div class="bookmark-label-row">\${labelArea}</div>
                 </div>
                 <div class="bookmark-tags">
                   <span class="type-badge \${item.type}">\${typeLabel(item.type)}</span>
+                  \${lineBadgeText ? '<span class="line-badge">' + escapeHtml(lineBadgeText) + '</span>' : ""}
                   \${item.pinned ? '<span class="pin-badge">' + dict.pinnedBadge + '</span>' : ""}
                   \${item.missing ? '<span class="status-badge missing">' + dict.missingBadge + '</span>' : ""}
                 </div>
                 <div class="bookmark-path">\${escapeHtml(pathText)}</div>
-                \${lineText ? '<div class="bookmark-line">' + escapeHtml(lineText) + '</div>' : ""}
               </div>
               <div class="bookmark-actions">
-                \${manualSort ? '<button class="bookmark-shift" title="' + dict.moveUp + '" data-move-bookmark="up" data-bookmark-id="' + item.id + '">↑</button>' : ""}
-                \${manualSort ? '<button class="bookmark-shift" title="' + dict.moveDown + '" data-move-bookmark="down" data-bookmark-id="' + item.id + '">↓</button>' : ""}
+                \${manualSort && compact ? '<button class="bookmark-shift" title="' + dict.moveUp + '" data-move-bookmark="up" data-bookmark-id="' + item.id + '">↑</button>' : ""}
+                \${manualSort && compact ? '<button class="bookmark-shift" title="' + dict.moveDown + '" data-move-bookmark="down" data-bookmark-id="' + item.id + '">↓</button>' : ""}
                 <button class="bookmark-menu" title="More" data-menu="\${item.id}">···</button>
               </div>
             </article>
           \`;
         }).join("");
 
-        return \`
-          <section class="section \${state.draggingGroupId === section.groupId ? "section-drop-target" : ""}" data-section-group="\${section.groupId}">
-            <div class="section-header \${toneClass} \${section.draggable ? "is-draggable" : ""}" \${section.draggable ? 'draggable="true" data-draggable-group="' + section.groupId + '"' : ""}>
-              <div class="section-title-wrap">
-                <div class="section-title">\${escapeHtml(section.title)}</div>
-                \${section.subtitle ? '<div class="section-subtitle">' + escapeHtml(section.subtitle) + '</div>' : ""}
-              </div>
-              <div class="section-meta">
-                <span class="pill">\${items.length} \${dict.itemSuffix}</span>
-                <button class="section-sort" data-section-sort="\${section.groupId}">\${dict.sortSection}</button>
-                \${section.collapsible ? '<button class="section-toggle" data-group-toggle="' + section.groupId + '" data-next-collapsed="' + String(!collapsed) + '">' + (collapsed ? dict.expand : dict.collapse) + '</button>' : ""}
-                <button class="section-menu" data-group-menu="\${section.groupId}">···</button>
-              </div>
+	        return \`
+	          <section class="section \${state.draggingGroupId === section.groupId ? "section-drop-target" : ""} \${state.bookmarkDropGroupId === section.groupId ? "section-bookmark-drop-target" : ""}" data-section-group="\${section.groupId}">
+	            <div class="section-header \${toneClass} \${section.draggable ? "is-draggable" : ""}" data-group-header-toggle="\${section.groupId}" data-next-collapsed="\${String(!collapsed)}" \${section.draggable ? 'draggable="true" data-draggable-group="' + section.groupId + '"' : ""}>
+	              <div class="section-title-wrap">
+	                <div class="section-title">
+	                  <button class="section-chevron" data-group-toggle="\${section.groupId}" data-next-collapsed="\${String(!collapsed)}" data-collapsed="\${String(collapsed)}" aria-label="\${collapsed ? dict.expand : dict.collapse}" aria-expanded="\${String(!collapsed)}">\${collapsed ? "▸" : "▾"}</button>
+	                  <span class="section-name">\${escapeHtml(section.title)}</span>
+	                </div>
+	                \${section.subtitle ? '<div class="section-subtitle">' + escapeHtml(section.subtitle) + '</div>' : ""}
+	              </div>
+	              <div class="section-meta">
+		                <span class="pill section-control section-count">\${items.length} \${dict.itemSuffix}</span>
+		                <button class="section-control section-sort" data-section-sort="\${section.groupId}">\${dict.sortSection}</button>
+		                <button class="section-control section-menu" data-group-menu="\${section.groupId}">···</button>
+	              </div>
             </div>
             <div class="section-list \${collapsed ? "collapsed" : ""}">
               \${rows || '<div class="empty-copy">' + escapeHtml(dict.emptyGroup || "") + "</div>"}
@@ -1564,7 +2536,8 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         if (!data) return;
 
         renderChromeTexts(data.locale);
-        document.getElementById("workspace-name").textContent = data.workspaceName;
+        document.body.classList.toggle("is-compact", data.compactMode === true);
+        applyThemeMode(data.themeMode || "system");
         document.getElementById("stat-total").textContent = String(data.total);
         document.getElementById("stat-pinned").textContent = String(data.pinned);
         document.getElementById("stat-missing").textContent = String(data.missing);
@@ -1591,7 +2564,6 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       function renderChromeTexts(locale) {
         const dict = i18n[locale];
         document.getElementById("hero-title").textContent = dict.heroTitle;
-        document.getElementById("hero-subtitle").textContent = dict.heroSubtitle;
         document.getElementById("label-total").textContent = dict.total;
         document.getElementById("label-pinned").textContent = dict.pinned;
         document.getElementById("label-missing").textContent = dict.missing;
@@ -1606,7 +2578,15 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         createGroupInputEl.placeholder = dict.groupNamePlaceholder;
         createGroupSaveEl.textContent = dict.save;
         createGroupCancelEl.textContent = dict.cancel;
-        document.getElementById("locale-toggle").textContent = dict.languageToggle;
+        document.getElementById("locale-toggle").textContent = dict.languageCurrent;
+        compactToggleEl.textContent = state.data?.compactMode ? dict.compactCompact : dict.compactStandard;
+        compactToggleEl.setAttribute("aria-pressed", state.data?.compactMode ? "true" : "false");
+        themeToggleEl.setAttribute("aria-label", dict.themeLabel + ": " + themeText(dict, state.data?.themeMode || "system"));
+        themeToggleEl.setAttribute("data-quick-tooltip", dict.themeLabel + ": " + themeText(dict, state.data?.themeMode || "system"));
+        themeToggleEl.removeAttribute("title");
+        feedbackToggleEl.setAttribute("aria-label", dict.feedbackLabel);
+        feedbackToggleEl.setAttribute("data-quick-tooltip", dict.feedbackLabel);
+        feedbackToggleEl.removeAttribute("title");
         document.getElementById("empty-checklist").innerHTML = dict.emptyChecklist.map((line) => '<div>' + escapeHtml(line) + "</div>").join("");
 
         const filterText = {
@@ -1623,8 +2603,28 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
             chip.textContent = filterText[filter];
           }
         });
+        const currentThemeMode = state.data?.themeMode || "system";
+        themeMenuEl.innerHTML = themeOptions.map((option) => {
+          const isActive = option.id === currentThemeMode;
+          return (
+            '<button class="' +
+            (isActive ? "is-active" : "") +
+            '" data-theme-option="' +
+            option.id +
+            '" role="menuitemradio" aria-checked="' +
+            (isActive ? "true" : "false") +
+            '">' +
+            '<span class="theme-swatch ' +
+            option.id +
+            '"></span><span>' +
+            escapeHtml(dict[option.labelKey]) +
+            "</span></button>"
+          );
+        }).join("");
 
         contextMenuEl.querySelector('[data-menu-action="open"]').textContent = dict.open;
+        contextMenuEl.querySelector('[data-menu-action="move-up"]').textContent = dict.moveUp;
+        contextMenuEl.querySelector('[data-menu-action="move-down"]').textContent = dict.moveDown;
         contextMenuEl.querySelector('[data-menu-action="move-group"]').textContent = dict.moveGroup;
         contextMenuEl.querySelector('[data-menu-action="rename"]').textContent = dict.rename;
         contextMenuEl.querySelector('[data-menu-action="delete"]').textContent = dict.delete;
@@ -1661,6 +2661,53 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
           const dict = i18n[state.data?.locale || "zh"];
           pinButton.textContent = bookmark.pinned ? dict.unpin : dict.pin;
         }
+        const currentSection = findSectionForBookmark(bookmark.id);
+        const bookmarkIndex = currentSection ? currentSection.items.findIndex((item) => item.id === bookmark.id) : -1;
+        const previousBookmark = currentSection && bookmarkIndex > 0 ? currentSection.items[bookmarkIndex - 1] : null;
+        const nextBookmark = currentSection && bookmarkIndex >= 0 ? currentSection.items[bookmarkIndex + 1] : null;
+        const moveUpButton = contextMenuEl.querySelector('[data-menu-action="move-up"]');
+        const moveDownButton = contextMenuEl.querySelector('[data-menu-action="move-down"]');
+        if (moveUpButton) {
+          moveUpButton.style.display = "block";
+          moveUpButton.disabled = !currentSection || bookmarkIndex <= 0 || previousBookmark?.pinned !== bookmark.pinned;
+        }
+        if (moveDownButton) {
+          moveDownButton.style.display = "block";
+          moveDownButton.disabled = !currentSection || bookmarkIndex < 0 || !nextBookmark || nextBookmark.pinned !== bookmark.pinned;
+        }
+        const moveGroupButton = contextMenuEl.querySelector('[data-menu-action="move-group"]');
+        if (moveGroupButton) {
+          const currentGroupId = findSectionIdForBookmark(bookmark.id);
+          moveGroupButton.disabled = listMoveGroupTargets(state.data.sections, currentGroupId).length === 0;
+        }
+        renderMoveGroupSubmenu(bookmark.id);
+      }
+
+      function renderMoveGroupSubmenu(bookmarkId) {
+        if (!state.data || !state.contextMoveGroupExpanded) {
+          moveGroupSubmenuEl.innerHTML = "";
+          moveGroupSubmenuEl.classList.remove("visible");
+          return;
+        }
+        const currentGroupId = findSectionIdForBookmark(bookmarkId);
+        const options = listMoveGroupTargets(state.data.sections, currentGroupId);
+        if (options.length === 0) {
+          moveGroupSubmenuEl.innerHTML = "";
+          moveGroupSubmenuEl.classList.remove("visible");
+          return;
+        }
+        moveGroupSubmenuEl.innerHTML = options
+          .map((section) =>
+            '<button data-context-move-group="' +
+            section.groupId +
+            '" data-bookmark-id="' +
+            bookmarkId +
+            '">' +
+            escapeHtml(section.title) +
+            "</button>"
+          )
+          .join("");
+        moveGroupSubmenuEl.classList.add("visible");
       }
 
       function renderGroupMenu() {
@@ -1682,6 +2729,18 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         if (deleteButton) deleteButton.style.display = section.system ? "none" : "block";
       }
 
+      function openGroupMenuAt(groupId, x, y) {
+        hideAddMenu();
+        hideThemeMenu();
+        hideContextMenu();
+        hidePickerMenu();
+        state.groupMenu.visible = true;
+        state.groupMenu.groupId = groupId;
+        state.groupMenu.x = Math.max(8, Math.min(x, window.innerWidth - 160));
+        state.groupMenu.y = Math.max(8, Math.min(y, window.innerHeight - 180));
+        renderGroupMenu();
+      }
+
       function findBookmarkById(id) {
         if (!state.data) return null;
         for (const section of state.data.sections) {
@@ -1696,9 +2755,17 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         return state.data.sections.find((section) => section.groupId === groupId) || null;
       }
 
+      function findSectionForBookmark(bookmarkId) {
+        if (!state.data) return null;
+        return state.data.sections.find((section) => section.items.some((item) => item.id === bookmarkId)) || null;
+      }
+
       function hideContextMenu() {
         state.contextMenu.visible = false;
         state.contextMenu.bookmarkId = null;
+        state.contextMoveGroupExpanded = false;
+        moveGroupSubmenuEl.innerHTML = "";
+        moveGroupSubmenuEl.classList.remove("visible");
         contextMenuEl.classList.remove("visible");
       }
 
@@ -1720,12 +2787,52 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         addMenuEl.classList.remove("visible");
       }
 
+      function hideThemeMenu() {
+        themeMenuEl.classList.remove("visible");
+        themeToggleEl.setAttribute("aria-expanded", "false");
+      }
+
+      function showQuickTooltip(anchorEl) {
+        const text = anchorEl.dataset.quickTooltip;
+        if (!text) return;
+        window.clearTimeout(quickTooltipTimer);
+        quickTooltipTimer = window.setTimeout(() => {
+          const rect = anchorEl.getBoundingClientRect();
+          quickTooltipEl.textContent = text;
+          quickTooltipEl.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 228)) + "px";
+          quickTooltipEl.style.top = Math.min(rect.bottom + 6, window.innerHeight - 32) + "px";
+          quickTooltipEl.classList.add("visible");
+        }, 120);
+      }
+
+      function hideQuickTooltip() {
+        window.clearTimeout(quickTooltipTimer);
+        quickTooltipEl.classList.remove("visible");
+      }
+
+      function toggleThemeMenu() {
+        hideQuickTooltip();
+        const nextVisible = !themeMenuEl.classList.contains("visible");
+        hideAddMenu();
+        hideContextMenu();
+        hideGroupMenu();
+        hidePickerMenu();
+        if (nextVisible) {
+          const rect = themeToggleEl.getBoundingClientRect();
+          themeMenuEl.style.left = Math.max(8, Math.min(rect.right - 174, window.innerWidth - 182)) + "px";
+          themeMenuEl.style.top = Math.min(rect.bottom + 6, window.innerHeight - 352) + "px";
+        }
+        themeMenuEl.classList.toggle("visible", nextVisible);
+        themeToggleEl.setAttribute("aria-expanded", nextVisible ? "true" : "false");
+      }
+
       function showGroupForm(mode, groupId) {
         state.groupFormVisible = true;
         state.groupFormMode = mode;
         state.editingGroupId = groupId || null;
         createGroupFormEl.classList.add("visible");
         hideAddMenu();
+        hideThemeMenu();
         hideContextMenu();
         hideGroupMenu();
         hidePickerMenu();
@@ -1759,6 +2866,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
 
       function toggleAddMenu() {
         const nextVisible = !addMenuEl.classList.contains("visible");
+        hideThemeMenu();
         hideContextMenu();
         hideGroupMenu();
         hidePickerMenu();
@@ -1811,6 +2919,90 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         return null;
       }
 
+      function listMoveGroupTargets(sections, currentGroupId) {
+        return sections.filter((section) => section.groupId !== currentGroupId);
+      }
+
+      function canDropBookmarkOnTarget(sourceId, targetId) {
+        if (!sourceId || !targetId || sourceId === targetId) return false;
+        const source = findBookmarkById(sourceId);
+        const target = findBookmarkById(targetId);
+        if (!source || !target) return false;
+        return source.pinned === target.pinned;
+      }
+
+      function postBookmarkReorder(groupId, itemIds) {
+        if (!state.draggingBookmarkId || itemIds.length === 0) return;
+        if (groupId === state.draggingBookmarkGroupId) {
+          post("reorderBookmarks", { groupId, itemIds });
+          return;
+        }
+        post("moveBookmarkToGroupAndReorder", {
+          id: state.draggingBookmarkId,
+          groupId,
+          itemIds
+        });
+      }
+
+      function moveBookmarkWithinVisibleOrder(bookmarkId, direction) {
+        const section = findSectionForBookmark(bookmarkId);
+        if (!section) return;
+        const currentIndex = section.items.findIndex((item) => item.id === bookmarkId);
+        const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= section.items.length) return;
+        const current = section.items[currentIndex];
+        const target = section.items[targetIndex];
+        if (!current || !target || current.pinned !== target.pinned) return;
+        const itemIds = section.items.map((item) => item.id);
+        itemIds[currentIndex] = target.id;
+        itemIds[targetIndex] = current.id;
+        post("reorderBookmarks", { groupId: section.groupId, itemIds });
+      }
+
+      function clearBookmarkDropIndicators() {
+        document.querySelectorAll(".bookmark.is-drop-before, .bookmark.is-drop-after").forEach((item) => {
+          item.classList.remove("is-drop-before", "is-drop-after");
+          if (item instanceof HTMLElement) {
+            delete item.dataset.dropPlacement;
+          }
+        });
+        document.querySelectorAll(".section-bookmark-drop-target").forEach((item) => {
+          item.classList.remove("section-bookmark-drop-target");
+        });
+        state.bookmarkDropGroupId = null;
+      }
+
+      function orderedBookmarkIdsAfterDrop(groupId, targetId, placement) {
+        const section = findSectionByGroupId(groupId);
+        if (!section || !state.draggingBookmarkId) return [];
+        const nextIds = section.items.map((item) => item.id).filter((id) => id !== state.draggingBookmarkId);
+        const targetIndex = nextIds.indexOf(targetId);
+        if (targetIndex === -1) return [];
+        nextIds.splice(placement === "after" ? targetIndex + 1 : targetIndex, 0, state.draggingBookmarkId);
+        return nextIds;
+      }
+
+      function orderedBookmarkIdsForGroupAppend(groupId) {
+        const section = findSectionByGroupId(groupId);
+        const source = state.draggingBookmarkId ? findBookmarkById(state.draggingBookmarkId) : null;
+        if (!section || !state.draggingBookmarkId || !source) return [];
+        const nextIds = section.items.map((item) => item.id).filter((id) => id !== state.draggingBookmarkId);
+        const sameTierLastIndex = section.items
+          .filter((item) => item.id !== state.draggingBookmarkId)
+          .map((item) => item.pinned === source.pinned)
+          .lastIndexOf(true);
+        if (sameTierLastIndex === -1) {
+          if (source.pinned) {
+            nextIds.unshift(state.draggingBookmarkId);
+          } else {
+            nextIds.push(state.draggingBookmarkId);
+          }
+          return nextIds;
+        }
+        nextIds.splice(sameTierLastIndex + 1, 0, state.draggingBookmarkId);
+        return nextIds;
+      }
+
       function openSortPicker(groupId, anchorEl) {
         const section = findSectionByGroupId(groupId);
         if (!section || !(anchorEl instanceof HTMLElement)) return;
@@ -1853,6 +3045,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         const options = listMoveGroupTargets(state.data.sections, currentGroupId);
         if (options.length === 0) return;
         const rect = anchorEl.getBoundingClientRect();
+        const menuRect = contextMenuEl.getBoundingClientRect();
         pickerMenuEl.innerHTML = options
           .map((section) =>
             '<button data-picker-action="move-group" data-bookmark-id="' +
@@ -1868,8 +3061,10 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         state.pickerMenu.mode = "move-group";
         state.pickerMenu.bookmarkId = bookmarkId;
         state.pickerMenu.groupId = null;
-        state.pickerMenu.x = Math.max(8, Math.min(rect.left, window.innerWidth - 240));
-        state.pickerMenu.y = Math.min(rect.bottom + 6, window.innerHeight - 240);
+        const rightX = menuRect.right + 6;
+        const leftX = menuRect.left - 226;
+        state.pickerMenu.x = rightX + 220 <= window.innerWidth ? rightX : Math.max(8, leftX);
+        state.pickerMenu.y = Math.max(8, Math.min(rect.top, window.innerHeight - 240));
         pickerMenuEl.style.left = state.pickerMenu.x + "px";
         pickerMenuEl.style.top = state.pickerMenu.y + "px";
         pickerMenuEl.classList.add("visible");
@@ -1881,14 +3076,47 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         const actionTarget = target.closest("[data-action]");
         const toggleTarget = target.closest("[data-group-toggle]");
         const menuTarget = target.closest("[data-menu]");
-        const groupMenuTarget = target.closest("[data-group-menu]");
-        const sectionSortTarget = target.closest("[data-section-sort]");
-        const moveBookmarkTarget = target.closest("[data-move-bookmark]");
+	        const groupMenuTarget = target.closest("[data-group-menu]");
+	        const sectionSortTarget = target.closest("[data-section-sort]");
+	        const headerToggleTarget = target.closest("[data-group-header-toggle]");
+	        const moveBookmarkTarget = target.closest("[data-move-bookmark]");
         const inlineActionTarget = target.closest("[data-inline-action]");
         const renameInputTarget = target.closest("[data-rename-input]");
         const addMenuTarget = target.closest("#btn-add-menu");
         const addMenuContentTarget = target.closest("#add-menu");
+        const themeToggleTarget = target.closest("#theme-toggle");
+        const themeMenuContentTarget = target.closest("#theme-menu");
+        const themeOptionTarget = target.closest("[data-theme-option]");
+        const feedbackToggleTarget = target.closest("#feedback-toggle");
         const openTarget = target.closest("[data-open]");
+
+        if (feedbackToggleTarget instanceof HTMLElement) {
+          hideQuickTooltip();
+          post("openFeedback");
+          hideAddMenu();
+          hideContextMenu();
+          hideGroupMenu();
+          hidePickerMenu();
+          hideThemeMenu();
+          return;
+        }
+        if (themeOptionTarget instanceof HTMLElement && themeOptionTarget.dataset.themeOption) {
+          hideQuickTooltip();
+          post("setThemeMode", { themeMode: themeOptionTarget.dataset.themeOption });
+          hideThemeMenu();
+          return;
+        }
+        if (themeToggleTarget instanceof HTMLElement) {
+          toggleThemeMenu();
+          return;
+        }
+        if (themeMenuContentTarget instanceof HTMLElement) {
+          hideAddMenu();
+          hideContextMenu();
+          hideGroupMenu();
+          hidePickerMenu();
+          return;
+        }
 
         const action = actionTarget instanceof HTMLElement ? actionTarget.dataset.action : undefined;
         if (action) {
@@ -1901,6 +3129,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
           hideGroupMenu();
           hidePickerMenu();
           hideAddMenu();
+          hideThemeMenu();
           return;
         }
         if (addMenuTarget instanceof HTMLElement) {
@@ -1911,6 +3140,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
           hideContextMenu();
           hideGroupMenu();
           hidePickerMenu();
+          hideThemeMenu();
           return;
         }
         if (toggleTarget instanceof HTMLElement && toggleTarget.dataset.groupToggle) {
@@ -1921,6 +3151,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
           hideContextMenu();
           hideGroupMenu();
           hidePickerMenu();
+          hideThemeMenu();
           return;
         }
         if (sectionSortTarget instanceof HTMLElement && sectionSortTarget.dataset.sectionSort) {
@@ -1928,6 +3159,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
           hideContextMenu();
           hideGroupMenu();
           hideAddMenu();
+          hideThemeMenu();
           return;
         }
         if (moveBookmarkTarget instanceof HTMLElement && moveBookmarkTarget.dataset.bookmarkId && moveBookmarkTarget.dataset.moveBookmark) {
@@ -1938,33 +3170,47 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
           hideContextMenu();
           hideGroupMenu();
           hidePickerMenu();
+          hideThemeMenu();
           return;
         }
         if (menuTarget instanceof HTMLElement && menuTarget.dataset.menu) {
           const rect = menuTarget.getBoundingClientRect();
           hideAddMenu();
+          hideThemeMenu();
           hideGroupMenu();
           hidePickerMenu();
+          state.contextMoveGroupExpanded = false;
           state.contextMenu.visible = true;
           state.contextMenu.bookmarkId = menuTarget.dataset.menu;
           state.contextMenu.x = Math.max(8, Math.min(rect.left - 100, window.innerWidth - 160));
-          state.contextMenu.y = Math.min(rect.bottom + 6, window.innerHeight - 160);
+          state.contextMenu.y = Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - 248));
           renderContextMenu();
           return;
         }
         if (groupMenuTarget instanceof HTMLElement && groupMenuTarget.dataset.groupMenu) {
           const rect = groupMenuTarget.getBoundingClientRect();
-          hideAddMenu();
-          hideContextMenu();
-          hidePickerMenu();
-          state.groupMenu.visible = true;
-          state.groupMenu.groupId = groupMenuTarget.dataset.groupMenu;
-          state.groupMenu.x = Math.max(8, Math.min(rect.left - 100, window.innerWidth - 160));
-          state.groupMenu.y = Math.min(rect.bottom + 6, window.innerHeight - 180);
-          renderGroupMenu();
+          openGroupMenuAt(groupMenuTarget.dataset.groupMenu, rect.left - 100, rect.bottom + 6);
           return;
         }
-        if (inlineActionTarget instanceof HTMLElement && inlineActionTarget.dataset.inlineAction) {
+	        if (
+	          headerToggleTarget instanceof HTMLElement &&
+	          headerToggleTarget.dataset.groupHeaderToggle &&
+	          !target.closest(".section-meta")
+	        ) {
+	          if (state.suppressNextGroupToggle) {
+	            state.suppressNextGroupToggle = false;
+	            return;
+	          }
+	          post("toggleGroupCollapsed", {
+	            groupId: headerToggleTarget.dataset.groupHeaderToggle,
+	            collapsed: headerToggleTarget.dataset.nextCollapsed === "true"
+	          });
+	          hideContextMenu();
+	          hideGroupMenu();
+	          hidePickerMenu();
+	          return;
+	        }
+	        if (inlineActionTarget instanceof HTMLElement && inlineActionTarget.dataset.inlineAction) {
           const actionName = inlineActionTarget.dataset.inlineAction;
           const bookmarkId = inlineActionTarget.dataset.bookmarkId;
           if (actionName === "save-rename") {
@@ -1982,46 +3228,77 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
           hidePickerMenu();
           return;
         }
-        if (openTarget instanceof HTMLElement && openTarget.dataset.open) {
-          post("openBookmark", { id: openTarget.dataset.open });
-          hideContextMenu();
+	        if (openTarget instanceof HTMLElement && openTarget.dataset.open) {
+	          if (state.suppressNextOpen) {
+	            state.suppressNextOpen = false;
+	            return;
+	          }
+	          post("openBookmark", { id: openTarget.dataset.open });
+	          hideContextMenu();
           hideGroupMenu();
           hidePickerMenu();
           hideAddMenu();
+          hideThemeMenu();
           return;
         }
         hideContextMenu();
         hideGroupMenu();
         hidePickerMenu();
         hideAddMenu();
+        hideThemeMenu();
       });
 
       document.body.addEventListener("contextmenu", (event) => {
-        const bookmark = event.target instanceof HTMLElement ? event.target.closest("[data-bookmark-id]") : null;
-        if (!(bookmark instanceof HTMLElement)) return;
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+
+        const bookmark = target.closest("[data-bookmark-id]");
+        if (bookmark instanceof HTMLElement) {
+          event.preventDefault();
+          hideAddMenu();
+          hideThemeMenu();
+          hideGroupMenu();
+          hidePickerMenu();
+          state.contextMoveGroupExpanded = false;
+          state.contextMenu.visible = true;
+          state.contextMenu.bookmarkId = bookmark.dataset.bookmarkId;
+          state.contextMenu.x = Math.min(event.clientX, window.innerWidth - 160);
+          state.contextMenu.y = Math.max(8, Math.min(event.clientY, window.innerHeight - 248));
+          renderContextMenu();
+          return;
+        }
+
+        const groupHeader = target.closest("[data-group-header-toggle]");
+        if (!(groupHeader instanceof HTMLElement) || !groupHeader.dataset.groupHeaderToggle) return;
         event.preventDefault();
-        hideGroupMenu();
-        hidePickerMenu();
-        state.contextMenu.visible = true;
-        state.contextMenu.bookmarkId = bookmark.dataset.bookmarkId;
-        state.contextMenu.x = Math.min(event.clientX, window.innerWidth - 160);
-        state.contextMenu.y = Math.min(event.clientY, window.innerHeight - 160);
-        renderContextMenu();
+        openGroupMenuAt(groupHeader.dataset.groupHeaderToggle, event.clientX, event.clientY);
       });
 
       contextMenuEl.addEventListener("click", (event) => {
         event.stopPropagation();
         const target = event.target;
         if (!(target instanceof HTMLElement)) return;
-        const action = target.dataset.menuAction;
+        const moveGroupTarget = target.closest("[data-context-move-group]");
+        if (moveGroupTarget instanceof HTMLElement && moveGroupTarget.dataset.contextMoveGroup) {
+          const bookmarkId = moveGroupTarget.dataset.bookmarkId || state.contextMenu.bookmarkId;
+          if (bookmarkId) {
+            post("moveBookmarkToGroup", { id: bookmarkId, groupId: moveGroupTarget.dataset.contextMoveGroup });
+          }
+          hideContextMenu();
+          return;
+        }
+        const actionTarget = target.closest("[data-menu-action]");
+        const action = actionTarget instanceof HTMLElement ? actionTarget.dataset.menuAction : undefined;
         const bookmarkId = state.contextMenu.bookmarkId;
         if (!action || !bookmarkId) return;
 
         if (action === "open") post("openBookmark", { id: bookmarkId });
         if (action === "pin") post("togglePinned", { id: bookmarkId });
+        if (action === "move-up") moveBookmarkWithinVisibleOrder(bookmarkId, "up");
+        if (action === "move-down") moveBookmarkWithinVisibleOrder(bookmarkId, "down");
         if (action === "move-group") {
-          openMoveGroupPicker(bookmarkId, target);
-          hideContextMenu();
+          state.contextMoveGroupExpanded = !state.contextMoveGroupExpanded;
+          renderMoveGroupSubmenu(bookmarkId);
           return;
         }
         if (action === "rename") startRename(bookmarkId);
@@ -2060,6 +3337,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         }
         if (action === "move-group" && target.dataset.bookmarkId && target.dataset.groupId) {
           post("moveBookmarkToGroup", { id: target.dataset.bookmarkId, groupId: target.dataset.groupId });
+          hideContextMenu();
         }
         hidePickerMenu();
       });
@@ -2086,12 +3364,24 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         }
       });
 
-      sectionsEl.addEventListener("dragstart", (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLElement)) return;
-        const header = target.closest("[data-draggable-group]");
-        if (!(header instanceof HTMLElement) || !header.dataset.draggableGroup) return;
-        state.draggingGroupId = header.dataset.draggableGroup;
+	      sectionsEl.addEventListener("dragstart", (event) => {
+	        const target = event.target;
+	        if (!(target instanceof HTMLElement)) return;
+	        const bookmark = target.closest("[data-draggable-bookmark]");
+	        if (bookmark instanceof HTMLElement && bookmark.dataset.draggableBookmark && bookmark.dataset.bookmarkGroup) {
+	          state.draggingBookmarkId = bookmark.dataset.draggableBookmark;
+	          state.draggingBookmarkGroupId = bookmark.dataset.bookmarkGroup;
+	          state.suppressNextOpen = false;
+	          bookmark.classList.add("is-dragging");
+	          if (event.dataTransfer) {
+	            event.dataTransfer.effectAllowed = "move";
+	            event.dataTransfer.setData("application/x-jumpjump-bookmark", state.draggingBookmarkId);
+	          }
+	          return;
+	        }
+	        const header = target.closest("[data-draggable-group]");
+	        if (!(header instanceof HTMLElement) || !header.dataset.draggableGroup) return;
+	        state.draggingGroupId = header.dataset.draggableGroup;
         header.classList.add("is-dragging");
         if (event.dataTransfer) {
           event.dataTransfer.effectAllowed = "move";
@@ -2099,30 +3389,95 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
         }
       });
 
-      sectionsEl.addEventListener("dragend", (event) => {
-        const target = event.target;
-        if (target instanceof HTMLElement) {
-          target.classList.remove("is-dragging");
-        }
-        state.draggingGroupId = null;
-        render();
-      });
+	      sectionsEl.addEventListener("dragend", (event) => {
+	        const target = event.target;
+	        if (target instanceof HTMLElement) {
+	          target.classList.remove("is-dragging");
+	        }
+	        if (state.draggingBookmarkId) {
+	          state.suppressNextOpen = true;
+	          window.setTimeout(() => {
+	            state.suppressNextOpen = false;
+	          }, 120);
+	        }
+	        if (state.draggingGroupId) {
+	          state.suppressNextGroupToggle = true;
+	          window.setTimeout(() => {
+	            state.suppressNextGroupToggle = false;
+	          }, 120);
+	        }
+	        state.draggingGroupId = null;
+	        state.draggingBookmarkId = null;
+	        state.draggingBookmarkGroupId = null;
+	        clearBookmarkDropIndicators();
+	        render();
+	      });
 
-      sectionsEl.addEventListener("dragover", (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLElement)) return;
-        const section = target.closest("[data-section-group]");
-        if (!(section instanceof HTMLElement)) return;
-        const groupId = section.dataset.sectionGroup;
+		      sectionsEl.addEventListener("dragover", (event) => {
+		        const target = event.target;
+		        if (!(target instanceof HTMLElement)) return;
+		        if (state.draggingBookmarkId) {
+		          const bookmark = target.closest("[data-bookmark-id]");
+		          if (bookmark instanceof HTMLElement && bookmark.dataset.bookmarkId && bookmark.dataset.bookmarkGroup) {
+		            if (!canDropBookmarkOnTarget(state.draggingBookmarkId, bookmark.dataset.bookmarkId)) return;
+		            event.preventDefault();
+		            if (event.dataTransfer) {
+		              event.dataTransfer.dropEffect = "move";
+		            }
+		            const rect = bookmark.getBoundingClientRect();
+		            const placement = event.clientY > rect.top + rect.height / 2 ? "after" : "before";
+		            clearBookmarkDropIndicators();
+		            state.bookmarkDropGroupId = bookmark.dataset.bookmarkGroup;
+		            bookmark.dataset.dropPlacement = placement;
+		            bookmark.classList.add(placement === "after" ? "is-drop-after" : "is-drop-before");
+		            return;
+		          }
+		          const bookmarkSection = target.closest("[data-section-group]");
+		          if (!(bookmarkSection instanceof HTMLElement) || !bookmarkSection.dataset.sectionGroup) return;
+		          event.preventDefault();
+		          if (event.dataTransfer) {
+		            event.dataTransfer.dropEffect = "move";
+		          }
+		          clearBookmarkDropIndicators();
+		          state.bookmarkDropGroupId = bookmarkSection.dataset.sectionGroup;
+		          bookmarkSection.classList.add("section-bookmark-drop-target");
+		          return;
+		        }
+		        const section = target.closest("[data-section-group]");
+		        if (!(section instanceof HTMLElement)) return;
+	        const groupId = section.dataset.sectionGroup;
         if (!state.draggingGroupId || !groupId || groupId === "${UNGROUPED_GROUP_ID}" || groupId === state.draggingGroupId) return;
         event.preventDefault();
       });
 
-      sectionsEl.addEventListener("drop", (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLElement)) return;
-        const section = target.closest("[data-section-group]");
-        if (!(section instanceof HTMLElement)) return;
+		      sectionsEl.addEventListener("drop", (event) => {
+		        const target = event.target;
+		        if (!(target instanceof HTMLElement)) return;
+		        if (state.draggingBookmarkId) {
+		          const bookmark = target.closest("[data-bookmark-id]");
+		          if (bookmark instanceof HTMLElement && bookmark.dataset.bookmarkId && bookmark.dataset.bookmarkGroup) {
+		            if (!canDropBookmarkOnTarget(state.draggingBookmarkId, bookmark.dataset.bookmarkId)) return;
+		            event.preventDefault();
+		            const placement = bookmark.dataset.dropPlacement === "after" ? "after" : "before";
+		            const itemIds = orderedBookmarkIdsAfterDrop(bookmark.dataset.bookmarkGroup, bookmark.dataset.bookmarkId, placement);
+		            postBookmarkReorder(bookmark.dataset.bookmarkGroup, itemIds);
+		            state.draggingBookmarkId = null;
+		            state.draggingBookmarkGroupId = null;
+		            clearBookmarkDropIndicators();
+		            return;
+		          }
+		          const bookmarkSection = target.closest("[data-section-group]");
+		          if (!(bookmarkSection instanceof HTMLElement) || !bookmarkSection.dataset.sectionGroup) return;
+		          event.preventDefault();
+		          const itemIds = orderedBookmarkIdsForGroupAppend(bookmarkSection.dataset.sectionGroup);
+		          postBookmarkReorder(bookmarkSection.dataset.sectionGroup, itemIds);
+		          state.draggingBookmarkId = null;
+		          state.draggingBookmarkGroupId = null;
+		          clearBookmarkDropIndicators();
+		          return;
+	        }
+	        const section = target.closest("[data-section-group]");
+	        if (!(section instanceof HTMLElement)) return;
         const targetGroupId = section.dataset.sectionGroup;
         const sourceGroupId = state.draggingGroupId;
         if (!sourceGroupId || !targetGroupId || targetGroupId === "${UNGROUPED_GROUP_ID}" || sourceGroupId === targetGroupId) return;
@@ -2145,9 +3500,25 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
 
       localeToggleEl.addEventListener("click", () => {
         hideAddMenu();
+        hideThemeMenu();
         hideGroupMenu();
         hidePickerMenu();
         post("toggleLanguage");
+      });
+
+      compactToggleEl.addEventListener("click", () => {
+        hideAddMenu();
+        hideThemeMenu();
+        hideGroupMenu();
+        hidePickerMenu();
+        post("toggleCompactMode");
+      });
+
+      [themeToggleEl, feedbackToggleEl].forEach((button) => {
+        button.addEventListener("mouseenter", () => showQuickTooltip(button));
+        button.addEventListener("mouseleave", hideQuickTooltip);
+        button.addEventListener("focus", () => showQuickTooltip(button));
+        button.addEventListener("blur", hideQuickTooltip);
       });
 
       createGroupSaveEl.addEventListener("click", () => {
@@ -2170,6 +3541,7 @@ export class JumpJumpSidebarProvider implements vscode.WebviewViewProvider {
       });
 
       window.addEventListener("scroll", () => {
+        hideQuickTooltip();
         hideContextMenu();
         hideGroupMenu();
         hidePickerMenu();
@@ -2230,6 +3602,8 @@ export class JumpJumpUnavailableSidebarProvider implements vscode.WebviewViewPro
       body {
         margin: 0;
         padding: 16px;
+        min-width: 304px;
+        overflow-x: auto;
         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         color: var(--vscode-sideBar-foreground);
         background:
@@ -2309,55 +3683,6 @@ function mapSidebarItem(item: BookmarkItem & { missing: boolean; pinned?: boolea
     pinned: item.pinned === true,
     lastOpenedAt: item.lastOpenedAt
   };
-}
-
-export function listMoveGroupTargets<T extends { groupId: string; title: string }>(
-  sections: T[],
-  currentGroupId: string | null
-): T[] {
-  return sections.filter((section) => section.groupId !== currentGroupId);
-}
-
-export function sortSectionItems(
-  items: (BookmarkItem & { missing: boolean; pinned?: boolean })[],
-  group: BookmarkGroup
-): (BookmarkItem & { missing: boolean; pinned?: boolean })[] {
-  return [...items].sort((a, b) => {
-    if (a.pinned !== b.pinned) {
-      return a.pinned ? -1 : 1;
-    }
-    if (group.sortBy !== "manual") {
-      if (a.missing !== b.missing) {
-        return a.missing ? 1 : -1;
-      }
-    }
-    let result = 0;
-    switch (group.sortBy) {
-      case "label":
-        result = a.label.localeCompare(b.label, "zh-Hans-CN");
-        break;
-      case "createdAt":
-        result = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-        break;
-      case "updatedAt":
-        result = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
-        break;
-      case "type":
-        result = a.type.localeCompare(b.type, "en");
-        if (result === 0) {
-          result = a.label.localeCompare(b.label, "zh-Hans-CN");
-        }
-        break;
-      case "manual":
-      default:
-        result = a.manualOrder - b.manualOrder;
-        if (result === 0) {
-          result = a.createdAt.localeCompare(b.createdAt);
-        }
-        break;
-    }
-    return group.sortDirection === "desc" ? -result : result;
-  });
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {

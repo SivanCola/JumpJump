@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101827"/>
+      <stop offset="1" stop-color="#080d16"/>
+    </linearGradient>
+    <linearGradient id="section" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#24314a"/>
+      <stop offset="1" stop-color="#151f30"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f2a3f"/>
+      <stop offset="1" stop-color="#121b2a"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000" flood-opacity=".36"/>
+    </filter>
+  </defs>
+  <rect width="1280" height="760" fill="url(#bg)"/>
+  <circle cx="980" cy="90" r="280" fill="#88c0d0" opacity=".13"/>
+  <circle cx="170" cy="660" r="240" fill="#a3be8c" opacity=".08"/>
+  <rect x="90" y="54" width="1100" height="650" rx="22" fill="#0f1624" filter="url(#shadow)"/>
+  <rect x="90" y="54" width="60" height="650" rx="22" fill="#0b111c"/>
+  <text x="180" y="98" fill="#d8dee9" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="800" letter-spacing="1.2">BOOKMARKS</text>
+  <g transform="translate(180 136)">
+    <rect width="340" height="94" rx="14" fill="#1b2638" stroke="#6e7d93"/>
+    <text x="18" y="30" fill="#eceff4" font-family="Inter,Arial,sans-serif" font-size="20" font-weight="800">Navigator</text>
+    <rect x="18" y="52" width="82" height="27" rx="14" fill="#26334b" stroke="#728198"/><text x="30" y="70" fill="#eceff4" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700">Compact</text>
+    <rect x="110" y="52" width="78" height="27" rx="14" fill="#26334b" stroke="#728198"/><text x="127" y="70" fill="#eceff4" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700">English</text>
+    <circle cx="212" cy="65" r="14" fill="#26334b" stroke="#728198"/>
+  </g>
+  <g transform="translate(180 254)">
+    <rect width="340" height="390" rx="14" fill="url(#section)" stroke="#6e7d93"/>
+    <path d="M22 24h11l-5.5 8z" fill="#eceff4"/>
+    <text x="48" y="33" fill="#eceff4" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="900" letter-spacing=".8">BACKEND</text>
+    <rect x="220" y="13" width="54" height="28" rx="14" fill="#2a3853" stroke="#8190a7"/>
+    <text x="235" y="32" fill="#eceff4" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="800">8 items</text>
+    <rect x="282" y="13" width="42" height="28" rx="14" fill="#2a3853" stroke="#8190a7"/>
+    <text x="294" y="32" fill="#eceff4" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="800">...</text>
+    <rect x="14" y="55" width="312" height="82" rx="10" fill="url(#card)" stroke="#303c54"/>
+    <text x="30" y="82" fill="#eceff4" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="800">cmd/</text>
+    <rect x="30" y="92" width="54" height="22" rx="11" fill="#17324f" stroke="#67b7ff"/><text x="41" y="107" fill="#dff2ff" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="700">Folder</text>
+    <text x="30" y="125" fill="#d8dee9" font-family="Inter,Arial,sans-serif" font-size="14">cmd</text>
+    <rect x="14" y="148" width="312" height="82" rx="10" fill="url(#card)" stroke="#303c54"/>
+    <text x="30" y="175" fill="#eceff4" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="800">router.ts</text>
+    <rect x="30" y="185" width="42" height="22" rx="11" fill="#20284a" stroke="#8fa4ff"/><text x="42" y="200" fill="#dfe5ff" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="700">File</text>
+    <text x="30" y="218" fill="#d8dee9" font-family="Inter,Arial,sans-serif" font-size="14">src/router.ts</text>
+    <rect x="14" y="241" width="312" height="82" rx="10" fill="url(#card)" stroke="#303c54"/>
+    <text x="30" y="268" fill="#eceff4" font-family="Inter,Arial,sans-serif" font-size="16" font-weight="800">service.ts:42</text>
+    <rect x="30" y="278" width="52" height="22" rx="11" fill="#14352d" stroke="#a3be8c"/><text x="41" y="293" fill="#e9ffde" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="700">Code</text>
+    <text x="30" y="311" fill="#d8dee9" font-family="Inter,Arial,sans-serif" font-size="14">src/service.ts</text>
+  </g>
+  <g transform="translate(422 302)">
+    <rect width="188" height="154" rx="14" fill="#0d1421" stroke="#6e7d93" filter="url(#shadow)"/>
+    <text x="24" y="36" fill="#eceff4" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="700">Create Group</text>
+    <text x="24" y="72" fill="#eceff4" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="700">Rename Group</text>
+    <text x="24" y="108" fill="#bf616a" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="700">Delete Group</text>
+  </g>
+  <g transform="translate(690 150)">
+    <text x="0" y="0" fill="#ffffff" font-family="Inter,Arial,sans-serif" font-size="42" font-weight="800">Group-first workflow</text>
+    <text x="0" y="48" fill="#a9b7cc" font-family="Inter,Arial,sans-serif" font-size="22">Right-click group headers or use the menu button.</text>
+    <g transform="translate(0 118)" fill="#eceff4" font-family="Inter,Arial,sans-serif" font-size="20">
+      <circle cx="10" cy="-6" r="5" fill="#88c0d0"/><text x="30" y="0">Collapse, rename, delete, and reorder groups</text>
+      <circle cx="10" cy="48" r="5" fill="#a3be8c"/><text x="30" y="54">Sort each group independently</text>
+      <circle cx="10" cy="102" r="5" fill="#ebcb8b"/><text x="30" y="108">Drag bookmarks between groups</text>
+      <circle cx="10" cy="156" r="5" fill="#bf616a"/><text x="30" y="162">Clean stale paths after repository changes</text>
+    </g>
+  </g>
+</svg>

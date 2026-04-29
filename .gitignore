@@ -13,3 +13,5 @@ out/
 # OS files
 .DS_Store
 .omx/
+.jumpjump
+.cursor/

@@ -18,6 +18,8 @@ import {
 } from "./schema";
 
 export class BookmarkStore {
+  private mutationQueue: Promise<void> = Promise.resolve();
+
   constructor(private readonly workspaceRoot: string) {}
 
   get configDirPath(): string {
@@ -29,27 +31,46 @@ export class BookmarkStore {
   }
 
   resolveAbsolutePath(relativePath: string): string {
-    return path.join(this.workspaceRoot, relativePath);
+    return path.resolve(this.workspaceRoot, relativePath);
   }
 
   toRelativePath(absolutePath: string): string {
-    return normalizeRelativePath(path.relative(this.workspaceRoot, absolutePath));
+    const relativePath = path.relative(this.workspaceRoot, absolutePath);
+    return normalizeRelativePath(relativePath || ".");
+  }
+
+  isPathInsideWorkspace(absolutePath: string): boolean {
+    const relativePath = path.relative(this.workspaceRoot, absolutePath);
+    return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
   }
 
   async ensureInitialized(): Promise<BookmarkFile> {
+    return this.enqueueMutation(() => this.ensureInitializedUnlocked());
+  }
+
+  async read(): Promise<BookmarkFile> {
+    await this.mutationQueue;
+    return this.readUnlocked();
+  }
+
+  async write(bookmarks: BookmarkFile): Promise<void> {
+    await this.enqueueMutation(() => this.writeUnlocked(bookmarks));
+  }
+
+  private async ensureInitializedUnlocked(): Promise<BookmarkFile> {
     try {
-      return await this.read();
+      return await this.readUnlocked();
     } catch (error) {
       if (isFileMissingError(error)) {
         const emptyFile = createEmptyBookmarkFile();
-        await this.write(emptyFile);
+        await this.writeUnlocked(emptyFile);
         return emptyFile;
       }
       throw error;
     }
   }
 
-  async read(): Promise<BookmarkFile> {
+  private async readUnlocked(): Promise<BookmarkFile> {
     const raw = await fs.readFile(this.configPath, "utf8");
     let parsed: unknown;
     try {
@@ -60,10 +81,19 @@ export class BookmarkStore {
     return validateBookmarkFile(parsed);
   }
 
-  async write(bookmarks: BookmarkFile): Promise<void> {
+  private async writeUnlocked(bookmarks: BookmarkFile): Promise<void> {
     await fs.mkdir(this.configDirPath, { recursive: true });
     const normalized = normalizeBookmarkFile(bookmarks);
     await fs.writeFile(this.configPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+  }
+
+  private enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.mutationQueue.then(operation, operation);
+    this.mutationQueue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
   }
 
   async addBookmark(input: {
@@ -74,191 +104,277 @@ export class BookmarkStore {
     groupId?: string;
     description?: string;
   }): Promise<BookmarkItem> {
-    const bookmarks = await this.ensureInitialized();
-    const groupId = this.ensureExistingGroupId(bookmarks, input.groupId);
-    const now = new Date().toISOString();
-    const item = normalizeBookmarkItem({
-      id: randomUUID(),
-      type: input.type,
-      label: input.label,
-      path: this.toRelativePath(input.absolutePath),
-      line: input.line,
-      groupId,
-      description: input.description,
-      createdAt: now,
-      updatedAt: now,
-      manualOrder: getNextManualOrder(bookmarks.items, groupId)
-    });
+    return this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const groupId = this.ensureExistingGroupId(bookmarks, input.groupId);
+      const now = new Date().toISOString();
+      const item = normalizeBookmarkItem({
+        id: randomUUID(),
+        type: input.type,
+        label: input.label,
+        path: this.toRelativePath(input.absolutePath),
+        line: input.line,
+        groupId,
+        description: input.description,
+        createdAt: now,
+        updatedAt: now,
+        manualOrder: getNextManualOrder(bookmarks.items, groupId)
+      });
 
-    bookmarks.items.push(item);
-    await this.write(bookmarks);
-    return item;
+      bookmarks.items.push(item);
+      await this.writeUnlocked(bookmarks);
+      return item;
+    });
   }
 
   async renameBookmark(id: string, label: string): Promise<BookmarkItem | undefined> {
-    const bookmarks = await this.read();
-    const target = bookmarks.items.find((item) => item.id === id);
-    if (!target) {
-      return undefined;
-    }
-    target.label = label.trim();
-    target.updatedAt = new Date().toISOString();
-    await this.write(bookmarks);
-    return target;
+    return this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const target = bookmarks.items.find((item) => item.id === id);
+      if (!target) {
+        return undefined;
+      }
+      target.label = label.trim();
+      target.updatedAt = new Date().toISOString();
+      await this.writeUnlocked(bookmarks);
+      return target;
+    });
   }
 
   async togglePinned(id: string): Promise<BookmarkItem | undefined> {
-    const bookmarks = await this.read();
-    const target = bookmarks.items.find((item) => item.id === id);
-    if (!target) {
-      return undefined;
-    }
-    target.pinned = target.pinned ? undefined : true;
-    target.updatedAt = new Date().toISOString();
-    await this.write(bookmarks);
-    return target;
+    return this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const target = bookmarks.items.find((item) => item.id === id);
+      if (!target) {
+        return undefined;
+      }
+      target.pinned = target.pinned ? undefined : true;
+      target.updatedAt = new Date().toISOString();
+      await this.writeUnlocked(bookmarks);
+      return target;
+    });
   }
 
   async markOpened(id: string): Promise<BookmarkItem | undefined> {
-    const bookmarks = await this.read();
-    const target = bookmarks.items.find((item) => item.id === id);
-    if (!target) {
-      return undefined;
-    }
-    target.lastOpenedAt = new Date().toISOString();
-    await this.write(bookmarks);
-    return target;
+    return this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const target = bookmarks.items.find((item) => item.id === id);
+      if (!target) {
+        return undefined;
+      }
+      target.lastOpenedAt = new Date().toISOString();
+      await this.writeUnlocked(bookmarks);
+      return target;
+    });
   }
 
   async moveBookmarkToGroup(id: string, groupId: string): Promise<BookmarkItem | undefined> {
-    const bookmarks = await this.read();
-    const target = bookmarks.items.find((item) => item.id === id);
-    if (!target) {
-      return undefined;
-    }
-    const resolvedGroupId = this.ensureExistingGroupId(bookmarks, groupId);
-    if (target.groupId === resolvedGroupId) {
+    return this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const target = bookmarks.items.find((item) => item.id === id);
+      if (!target) {
+        return undefined;
+      }
+      const resolvedGroupId = this.ensureExistingGroupId(bookmarks, groupId);
+      if (target.groupId === resolvedGroupId) {
+        return target;
+      }
+      target.groupId = resolvedGroupId;
+      target.manualOrder = getNextManualOrder(bookmarks.items.filter((item) => item.id !== id), resolvedGroupId);
+      target.updatedAt = new Date().toISOString();
+      await this.writeUnlocked(bookmarks);
       return target;
-    }
-    target.groupId = resolvedGroupId;
-    target.manualOrder = getNextManualOrder(bookmarks.items.filter((item) => item.id !== id), resolvedGroupId);
-    target.updatedAt = new Date().toISOString();
-    await this.write(bookmarks);
-    return target;
+    });
   }
 
   async moveBookmarkWithinGroup(id: string, direction: "up" | "down"): Promise<boolean> {
-    const bookmarks = await this.read();
-    const target = bookmarks.items.find((item) => item.id === id);
-    if (!target) {
-      return false;
-    }
-    const group = bookmarks.groups.find((entry) => entry.id === target.groupId);
-    if (!group || group.sortBy !== "manual") {
-      return false;
-    }
-    const groupItems = bookmarks.items
-      .filter((item) => item.groupId === target.groupId)
-      .sort((a, b) => a.manualOrder - b.manualOrder || a.createdAt.localeCompare(b.createdAt));
-    const index = groupItems.findIndex((item) => item.id === id);
-    if (index === -1) {
-      return false;
-    }
-    const swapIndex = direction === "up" ? index - 1 : index + 1;
-    if (swapIndex < 0 || swapIndex >= groupItems.length) {
-      return false;
-    }
-    const current = groupItems[index];
-    const other = groupItems[swapIndex];
-    const nextOrder = current.manualOrder;
-    current.manualOrder = other.manualOrder;
-    other.manualOrder = nextOrder;
-    current.updatedAt = new Date().toISOString();
-    other.updatedAt = new Date().toISOString();
-    await this.write(bookmarks);
-    return true;
+    return this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const target = bookmarks.items.find((item) => item.id === id);
+      if (!target) {
+        return false;
+      }
+      const group = bookmarks.groups.find((entry) => entry.id === target.groupId);
+      if (!group || group.sortBy !== "manual") {
+        return false;
+      }
+      const groupItems = sortManualGroupItemsForMovement(bookmarks.items.filter((item) => item.groupId === target.groupId));
+      const index = groupItems.findIndex((item) => item.id === id);
+      if (index === -1) {
+        return false;
+      }
+      const swapIndex = direction === "up" ? index - 1 : index + 1;
+      if (swapIndex < 0 || swapIndex >= groupItems.length) {
+        return false;
+      }
+      const current = groupItems[index];
+      const other = groupItems[swapIndex];
+      if ((current.pinned === true) !== (other.pinned === true)) {
+        return false;
+      }
+      const nextOrder = current.manualOrder;
+      current.manualOrder = other.manualOrder;
+      other.manualOrder = nextOrder;
+      current.updatedAt = new Date().toISOString();
+      other.updatedAt = new Date().toISOString();
+      await this.writeUnlocked(bookmarks);
+      return true;
+    });
+  }
+
+  async reorderBookmarksInGroup(groupId: string, itemIds: string[]): Promise<void> {
+    await this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const group = bookmarks.groups.find((entry) => entry.id === groupId);
+      if (!group) {
+        return;
+      }
+
+      const groupItems = bookmarks.items.filter((item) => item.groupId === groupId);
+      const allowedIds = new Set(groupItems.map((item) => item.id));
+      const nextIds = itemIds.filter((id) => allowedIds.has(id));
+      if (nextIds.length !== groupItems.length) {
+        throw new Error("书签排序数据不完整。");
+      }
+
+      group.sortBy = "manual";
+      group.sortDirection = "asc";
+      const now = new Date().toISOString();
+      nextIds.forEach((id, index) => {
+        const item = groupItems.find((entry) => entry.id === id);
+        if (item) {
+          item.manualOrder = index;
+          item.updatedAt = now;
+        }
+      });
+      await this.writeUnlocked(bookmarks);
+    });
+  }
+
+  async moveBookmarkToGroupAndReorder(id: string, groupId: string, itemIds: string[]): Promise<void> {
+    await this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const target = bookmarks.items.find((item) => item.id === id);
+      if (!target) {
+        return;
+      }
+      const resolvedGroupId = this.ensureExistingGroupId(bookmarks, groupId);
+      const group = bookmarks.groups.find((entry) => entry.id === resolvedGroupId);
+      if (!group) {
+        return;
+      }
+
+      const targetGroupItems = bookmarks.items.filter((item) => item.groupId === resolvedGroupId && item.id !== id);
+      const allowedIds = new Set([...targetGroupItems.map((item) => item.id), id]);
+      const nextIds = itemIds.filter((itemId) => allowedIds.has(itemId));
+      if (nextIds.length !== targetGroupItems.length + 1 || !nextIds.includes(id)) {
+        throw new Error("书签排序数据不完整。");
+      }
+
+      target.groupId = resolvedGroupId;
+      group.sortBy = "manual";
+      group.sortDirection = "asc";
+      const now = new Date().toISOString();
+      nextIds.forEach((itemId, index) => {
+        const item = bookmarks.items.find((entry) => entry.id === itemId);
+        if (item) {
+          item.groupId = resolvedGroupId;
+          item.manualOrder = index;
+          item.updatedAt = now;
+        }
+      });
+      await this.writeUnlocked(bookmarks);
+    });
   }
 
   async createGroup(name: string): Promise<BookmarkGroup> {
-    const bookmarks = await this.ensureInitialized();
-    const normalizedName = name.trim();
-    if (!normalizedName) {
-      throw new Error("分组名称不能为空。");
-    }
-    const existingNames = new Set(bookmarks.groups.map((group) => group.name));
-    if (existingNames.has(normalizedName)) {
-      throw new Error("分组名称已存在。");
-    }
-    const existingIds = new Set(bookmarks.groups.map((group) => group.id));
-    let nextId = createGroupId(normalizedName);
-    let suffix = 2;
-    while (existingIds.has(nextId)) {
-      nextId = `${createGroupId(normalizedName)}-${suffix}`;
-      suffix += 1;
-    }
+    return this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const normalizedName = name.trim();
+      if (!normalizedName) {
+        throw new Error("分组名称不能为空。");
+      }
+      const existingNames = new Set(bookmarks.groups.map((group) => group.name));
+      if (existingNames.has(normalizedName)) {
+        throw new Error("分组名称已存在。");
+      }
+      const existingIds = new Set(bookmarks.groups.map((group) => group.id));
+      let nextId = createGroupId(normalizedName);
+      let suffix = 2;
+      while (existingIds.has(nextId)) {
+        nextId = `${createGroupId(normalizedName)}-${suffix}`;
+        suffix += 1;
+      }
 
-    const group: BookmarkGroup = {
-      id: nextId,
-      name: normalizedName,
-      order: getNextGroupOrder(bookmarks.groups),
-      collapsed: false,
-      sortBy: "manual",
-      sortDirection: "asc"
-    };
-    bookmarks.groups.push(group);
-    await this.write(bookmarks);
-    return group;
+      const group: BookmarkGroup = {
+        id: nextId,
+        name: normalizedName,
+        order: getNextGroupOrder(bookmarks.groups),
+        collapsed: false,
+        sortBy: "manual",
+        sortDirection: "asc"
+      };
+      bookmarks.groups.push(group);
+      await this.writeUnlocked(bookmarks);
+      return group;
+    });
   }
 
   async renameGroup(groupId: string, name: string): Promise<BookmarkGroup | undefined> {
-    const bookmarks = await this.read();
-    const group = bookmarks.groups.find((entry) => entry.id === groupId);
-    if (!group || group.system) {
-      return undefined;
-    }
-    const normalizedName = name.trim();
-    if (!normalizedName) {
-      throw new Error("分组名称不能为空。");
-    }
-    if (bookmarks.groups.some((entry) => entry.id !== groupId && entry.name === normalizedName)) {
-      throw new Error("分组名称已存在。");
-    }
-    group.name = normalizedName;
-    await this.write(bookmarks);
-    return group;
+    return this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const group = bookmarks.groups.find((entry) => entry.id === groupId);
+      if (!group || group.system) {
+        return undefined;
+      }
+      const normalizedName = name.trim();
+      if (!normalizedName) {
+        throw new Error("分组名称不能为空。");
+      }
+      if (bookmarks.groups.some((entry) => entry.id !== groupId && entry.name === normalizedName)) {
+        throw new Error("分组名称已存在。");
+      }
+      group.name = normalizedName;
+      await this.writeUnlocked(bookmarks);
+      return group;
+    });
   }
 
   async deleteGroup(groupId: string): Promise<boolean> {
-    if (groupId === UNGROUPED_GROUP_ID) {
-      return false;
-    }
-    const bookmarks = await this.read();
-    const groupIndex = bookmarks.groups.findIndex((entry) => entry.id === groupId);
-    if (groupIndex === -1) {
-      return false;
-    }
-    bookmarks.groups.splice(groupIndex, 1);
-    for (const item of bookmarks.items) {
-      if (item.groupId === groupId) {
-        item.groupId = UNGROUPED_GROUP_ID;
-        item.manualOrder = getNextManualOrder(bookmarks.items.filter((entry) => entry.id !== item.id), UNGROUPED_GROUP_ID);
-        item.updatedAt = new Date().toISOString();
+    return this.enqueueMutation(async () => {
+      if (groupId === UNGROUPED_GROUP_ID) {
+        return false;
       }
-    }
-    reindexGroups(bookmarks.groups);
-    await this.write(bookmarks);
-    return true;
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const groupIndex = bookmarks.groups.findIndex((entry) => entry.id === groupId);
+      if (groupIndex === -1) {
+        return false;
+      }
+      bookmarks.groups.splice(groupIndex, 1);
+      for (const item of bookmarks.items) {
+        if (item.groupId === groupId) {
+          item.groupId = UNGROUPED_GROUP_ID;
+          item.manualOrder = getNextManualOrder(bookmarks.items.filter((entry) => entry.id !== item.id), UNGROUPED_GROUP_ID);
+          item.updatedAt = new Date().toISOString();
+        }
+      }
+      reindexGroups(bookmarks.groups);
+      await this.writeUnlocked(bookmarks);
+      return true;
+    });
   }
 
   async setGroupCollapsed(groupId: string, collapsed: boolean): Promise<BookmarkGroup | undefined> {
-    const bookmarks = await this.read();
-    const group = bookmarks.groups.find((entry) => entry.id === groupId);
-    if (!group) {
-      return undefined;
-    }
-    group.collapsed = collapsed;
-    await this.write(bookmarks);
-    return group;
+    return this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const group = bookmarks.groups.find((entry) => entry.id === groupId);
+      if (!group) {
+        return undefined;
+      }
+      group.collapsed = collapsed;
+      await this.writeUnlocked(bookmarks);
+      return group;
+    });
   }
 
   async setGroupSort(
@@ -266,60 +382,68 @@ export class BookmarkStore {
     sortBy: BookmarkSortBy,
     sortDirection: BookmarkSortDirection
   ): Promise<BookmarkGroup | undefined> {
-    const bookmarks = await this.read();
-    const group = bookmarks.groups.find((entry) => entry.id === groupId);
-    if (!group) {
-      return undefined;
-    }
-    group.sortBy = sortBy;
-    group.sortDirection = sortDirection;
-    await this.write(bookmarks);
-    return group;
+    return this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const group = bookmarks.groups.find((entry) => entry.id === groupId);
+      if (!group) {
+        return undefined;
+      }
+      group.sortBy = sortBy;
+      group.sortDirection = sortDirection;
+      await this.writeUnlocked(bookmarks);
+      return group;
+    });
   }
 
   async reorderGroups(groupIds: string[]): Promise<void> {
-    const bookmarks = await this.read();
-    const customGroups = bookmarks.groups.filter((group) => !group.system);
-    const allowedIds = new Set(customGroups.map((group) => group.id));
-    const nextIds = groupIds.filter((id) => allowedIds.has(id));
-    if (nextIds.length !== customGroups.length) {
-      throw new Error("分组排序数据不完整。");
-    }
-    nextIds.forEach((id, index) => {
-      const group = customGroups.find((entry) => entry.id === id);
-      if (group) {
-        group.order = index + 1;
+    await this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const customGroups = bookmarks.groups.filter((group) => !group.system);
+      const allowedIds = new Set(customGroups.map((group) => group.id));
+      const nextIds = groupIds.filter((id) => allowedIds.has(id));
+      if (nextIds.length !== customGroups.length) {
+        throw new Error("分组排序数据不完整。");
       }
+      nextIds.forEach((id, index) => {
+        const group = customGroups.find((entry) => entry.id === id);
+        if (group) {
+          group.order = index + 1;
+        }
+      });
+      await this.writeUnlocked(bookmarks);
     });
-    await this.write(bookmarks);
   }
 
   async deleteBookmark(id: string): Promise<boolean> {
-    const bookmarks = await this.read();
-    const nextItems = bookmarks.items.filter((item) => item.id !== id);
-    if (nextItems.length === bookmarks.items.length) {
-      return false;
-    }
-    bookmarks.items = nextItems;
-    await this.write(bookmarks);
-    return true;
+    return this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const nextItems = bookmarks.items.filter((item) => item.id !== id);
+      if (nextItems.length === bookmarks.items.length) {
+        return false;
+      }
+      bookmarks.items = nextItems;
+      await this.writeUnlocked(bookmarks);
+      return true;
+    });
   }
 
   async removeMissingBookmarks(): Promise<number> {
-    const bookmarks = await this.read();
-    const results = await Promise.all(
-      bookmarks.items.map(async (item) => ({
-        item,
-        exists: await pathExists(this.resolveAbsolutePath(item.path))
-      }))
-    );
-    const nextItems = results.filter((entry) => entry.exists).map((entry) => entry.item);
-    const removedCount = bookmarks.items.length - nextItems.length;
-    if (removedCount > 0) {
-      bookmarks.items = nextItems;
-      await this.write(bookmarks);
-    }
-    return removedCount;
+    return this.enqueueMutation(async () => {
+      const bookmarks = await this.ensureInitializedUnlocked();
+      const results = await Promise.all(
+        bookmarks.items.map(async (item) => ({
+          item,
+          exists: await pathExists(this.resolveAbsolutePath(item.path))
+        }))
+      );
+      const nextItems = results.filter((entry) => entry.exists).map((entry) => entry.item);
+      const removedCount = bookmarks.items.length - nextItems.length;
+      if (removedCount > 0) {
+        bookmarks.items = nextItems;
+        await this.writeUnlocked(bookmarks);
+      }
+      return removedCount;
+    });
   }
 
   private ensureExistingGroupId(bookmarks: BookmarkFile, groupId?: string): string {
@@ -347,6 +471,15 @@ function reindexGroups(groups: BookmarkGroup[]): void {
     .forEach((group, index) => {
       group.order = index + 1;
     });
+}
+
+function sortManualGroupItemsForMovement(items: BookmarkItem[]): BookmarkItem[] {
+  return [...items].sort((a, b) => {
+    if ((a.pinned === true) !== (b.pinned === true)) {
+      return a.pinned === true ? -1 : 1;
+    }
+    return a.manualOrder - b.manualOrder || a.createdAt.localeCompare(b.createdAt);
+  });
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {

@@ -2,15 +2,16 @@
 
 # JumpJump
 
-### Repository-local bookmarks for folders, files, and code locations
+### Repository-local navigation for folders, files, and code locations
 
 [![version](https://img.shields.io/visual-studio-marketplace/v/SivanLiu.jumpjump?label=version&color=2389d7)](https://marketplace.visualstudio.com/items?itemName=SivanLiu.jumpjump)
+[![open vsx](https://img.shields.io/open-vsx/v/SivanLiu/jumpjump?label=open%20vsx&color=8a63d2)](https://open-vsx.org/extension/SivanLiu/jumpjump)
 ![platform](https://img.shields.io/badge/platform-VS%20Code%20%7C%20Cursor-8a8a8a)
 ![built with](https://img.shields.io/badge/built%20with-TypeScript-3178c6)
 [![downloads](https://img.shields.io/visual-studio-marketplace/d/SivanLiu.jumpjump?label=downloads&color=39b91f)](https://marketplace.visualstudio.com/items?itemName=SivanLiu.jumpjump)
 [![license](https://img.shields.io/badge/license-Apache--2.0-orange)](LICENSE)
 
-English | [中文](#chinese) | [Changelog](CHANGELOG.md)
+English | [简体中文](#简体中文)
 
 </div>
 
@@ -18,84 +19,86 @@ English | [中文](#chinese) | [Changelog](CHANGELOG.md)
 
 ## English
 
-JumpJump turns frequently used repository folders, files, and code locations into a clean navigation panel inside VS Code and Cursor.
+JumpJump turns the places you revisit in a repository into a compact, clickable navigation panel for VS Code, Cursor, and other VS Code-compatible editors.
 
-Instead of searching for the same paths again and again, you can save them as repository-local bookmarks, organize them into groups, and jump back with one click.
+Use it to save important folders, files, and exact code locations, group them by workflow or module, and jump back without repeating Explorer searches.
 
-## Why JumpJump
+## Screenshots
 
-- Save folders, files, and exact code locations as reusable bookmarks
-- Keep bookmarks inside each repository with `.jumpjump/bookmarks.json`
-- Organize bookmarks into custom groups
-- Sort each group independently by manual order, name, added time, updated time, or type
-- Pin important items within the current group
-- Reorder groups and manually move items up or down
-- Clean invalid bookmarks after files or folders are moved or deleted
+![JumpJump sidebar overview](media/screenshots/sidebar-overview.png)
 
-## Typical Use Cases
+![JumpJump theme menu](media/screenshots/theme-menu.png)
 
-- Switch between `cmd/`, `internal/`, and `pkg/` in Go repositories
-- Jump between `app/`, `services/`, and `scripts/` in Python projects
-- Save entry files, config files, route files, and debugging locations
-- Share team navigation points by committing `.jumpjump/bookmarks.json`
+![JumpJump group menu](media/screenshots/group-menu.png)
+
+## What's New
+
+- Cleaner `Navigator` header with compact/standard mode, language switch, and a themed palette menu.
+- Expanded theme set: follow editor, dark, light, Aurora, Coffee, Purple Night, High Contrast, Sunlit, and Clean Light.
+- Right-click group headers to open the group menu, in addition to the `...` button.
+- Drag bookmarks within a group or across groups; drag sorting switches the target group to manual order.
+- Standard mode is quieter by default: the main Add menu is hidden from the toolbar, while empty-state actions and editor/explorer context menus remain available.
+
+## Highlights
+
+- Save folders, files, and line-level code locations as repository bookmarks.
+- Use a compact sidebar by default, with a standard mode available from the header.
+- Switch the sidebar language between English and Chinese.
+- Pick a sidebar theme: follow editor, dark, light, Aurora, Coffee, Purple Night, High Contrast, Sunlit, or Clean Light.
+- Add bookmarks from first-level right-click menu actions such as `JumpJump: Add Current File`.
+- Search and filter by all, pinned, folder, file, code location, or missing target.
+- Pin important bookmarks inside each group.
+- Create, rename, delete, collapse, and reorder groups.
+- Right-click a group header to open the same group menu as the `...` button.
+- Drag bookmarks within a group or between groups. Drag sorting automatically switches the destination group to manual order.
+- Move a bookmark to another group from the bookmark menu.
+- Clean missing bookmarks after files or folders are moved or deleted.
 
 ## Quick Start
 
 1. Install `JumpJump` from the VS Code Marketplace.
-2. Open a repository in VS Code or Cursor.
-3. Click the `JumpJump` icon in the Activity Bar.
-4. Add bookmarks from editor context menus, explorer context menus, or the sidebar.
+2. Open a single repository folder in VS Code or Cursor.
+3. Click the JumpJump icon in the Activity Bar.
+4. Add a file, folder, or code location from a right-click menu.
+5. Organize bookmarks into groups when the list starts to grow.
 
-## Entry Points
+## Add Bookmarks
 
-- Editor tab context menu:
-  - `JumpJump · 添加本文件 / Add Current File`
-  - `JumpJump · 添加本文件所在目录 / Add Current Folder`
-- Editor context menu:
-  - `JumpJump · 添加当前代码位置 / Add Current Location`
-- Explorer folder context menu:
-  - `JumpJump · 文件夹 / Folder`
-- Sidebar actions:
-  - `添加`
-  - `清理失效书签`
-  - `刷新 / Refresh`
+JumpJump contributes first-level context menu actions:
 
-## Bookmark Types
+| Where you right-click | Available actions |
+| --- | --- |
+| Editor tab or title area | `JumpJump: Add Current File`, `JumpJump: Add Current Folder` |
+| Editor content area | `JumpJump: Add Current Location`, `JumpJump: Add Current File`, `JumpJump: Add Current Folder` |
+| Explorer file | `JumpJump: Add Current File` |
+| Explorer folder | `JumpJump: Add Current Folder` |
 
-JumpJump supports three bookmark types:
+`Add Current Location` saves the active file and cursor line. It is intentionally available from the editor content area, where the current line is meaningful.
 
-- Folder
-- File
-- Code location
+## Sidebar Workflow
 
-New bookmarks are added to `Ungrouped` first, so you can collect locations quickly and organize them later.
+- Click a bookmark to open it.
+- Use `...` on a bookmark to open, pin or unpin, move to group, rename, or delete it.
+- Use the group header to collapse or expand a group.
+- Use `Sort` on a group to choose manual, label, created time, updated time, or type sorting.
+- Drag a group header to reorder custom groups.
+- Drag bookmark cards to reorder them or move them between groups.
 
-## Groups And Sorting
+Drag-and-drop ordering is available when the list is not filtered by search or type.
 
-- `Ungrouped` is the default system group.
-- You can create custom groups for modules, workflows, or business domains.
-- Bookmarks can be moved into any group.
-- Custom groups can be reordered by drag and drop.
-- Each group has its own sorting mode:
-  - manual order
-  - name
-  - added time
-  - updated time
-  - type
+## Display Preferences
 
-When a group uses manual sorting, item cards show move-up and move-down actions.
+The sidebar header includes:
 
-## Jumping And Maintenance
+- `Mode`: switch between compact and standard layouts.
+- `Language`: switch between English and Chinese.
+- Theme button: choose a palette for the sidebar.
 
-- Click a bookmark to open its target.
-- Folder bookmarks reveal the folder.
-- File bookmarks open the file.
-- Code location bookmarks open the file and jump to the saved line.
-- Missing targets are shown as invalid and can be cleaned with one action.
+Compact mode is the default layout. It keeps the sidebar dense for daily navigation while still exposing search, filters, groups, and bookmark actions. Theme choices are intentionally local to JumpJump's sidebar, so they can match your workflow without changing the whole editor theme.
 
-## Storage
+## Bookmark Storage
 
-JumpJump stores bookmarks in the current repository:
+Bookmarks are stored in the current repository:
 
 ```text
 .jumpjump/bookmarks.json
@@ -103,112 +106,127 @@ JumpJump stores bookmarks in the current repository:
 
 This means:
 
-- Bookmarks are scoped to the current repository.
-- Bookmarks are not shared across unrelated projects.
-- Teams can commit shared navigation data to Git.
+- Each repository has its own bookmark set.
+- Bookmarks can be committed to Git when you want shared team navigation.
+- Bookmarks are not uploaded to a remote service by JumpJump.
+
+User preferences are separate from bookmark data:
+
+- Language and theme are stored as editor-level extension state.
+- Compact mode is stored as the VS Code/Cursor user setting `jumpjump.compactMode`.
 
 ## Current Limits
 
-- JumpJump currently works with one repository at a time.
-- Code location bookmarks are based on `file path + line number`.
-- Line numbers may drift after large file edits.
+- JumpJump works with one workspace folder at a time.
+- Code location bookmarks use `file path + line number`.
+- Saved line numbers may drift after large edits.
 - Function, class, and symbol-level bookmarks are not supported yet.
+
+## Development
+
+```bash
+npm install
+npm run lint
+npm test
+npm run build
+```
+
+Package a local VSIX:
+
+```bash
+npm run package:vsix
+```
 
 ## Privacy
 
-JumpJump stores bookmarks inside the current repository and does not upload them to a remote service.
+JumpJump stores bookmark data locally in the current repository and does not send it to any remote service.
+
+## Bug Reports
+
+Report issues here: <https://github.com/SivanCola/JumpJump/issues>
 
 ## License
 
 JumpJump is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 
-## Bug Reports
-
-- Report here: <https://github.com/SivanCola/JumpJump/issues>
-
 ---
 
-<a id="chinese"></a>
+<a id="简体中文"></a>
 
-## 中文说明
+## 简体中文
 
-JumpJump 可以把仓库里的常用目录、文件和代码位置整理成可点击的导航入口。
+JumpJump 会把你在一个仓库里反复访问的位置整理成 VS Code、Cursor 以及其他兼容编辑器侧边栏里的可点击导航。
 
-从“反复搜索”到“分组管理 + 一键跳转”，这些操作都可以在一个侧边栏里完成。
+你可以收藏重要目录、文件和精确代码位置，把它们按工作流或模块分组，然后不用反复在资源管理器里搜索，直接跳回目标位置。
 
-## 为什么选 JumpJump
+## 最新版亮点
 
-- 仓库级导航：把高频目录、文件、代码位置沉淀成长期可复用的书签
-- 仓库内保存：书签写入 `.jumpjump/bookmarks.json`，可随仓库一起提交
-- 分组整理：新增书签先进入 `未分组`，后续可手动归类到业务分组
-- 分组内排序：每个分组独立支持 `手动 / 名称 / 添加时间 / 修改时间 / 类型`
-- 组内优先级：支持组内置顶，不需要单独维护全局置顶区
-- 快速维护：支持组内上移 / 下移、分组拖拽排序、失效书签清理
+- 顶部改为更简洁的「导航」区域，集中放置紧凑/标准模式、语言切换和主题菜单。
+- 主题扩展为：跟随编辑器、深色、浅色、极光、咖啡、紫夜、高对比度、日光、清爽浅色。
+- 分组标题支持右键菜单，和右侧 `...` 菜单保持一致。
+- 支持书签组内拖拽排序、跨分组拖拽移动，拖拽后目标分组自动切到手动排序。
+- 标准模式减少常驻说明和 Add 工具入口，保留搜索、筛选、分组管理和右键添加入口。
 
-## 典型使用场景
+## 功能亮点
 
-- 在 Go 项目里频繁切换 `cmd/`、`internal/`、`pkg/`
-- 在 Python 项目里频繁切换 `app/`、`services/`、`scripts/`
-- 收藏入口文件、配置文件、路由文件、调试点位
-- 团队把常用导航点跟仓库一起维护，而不是各自记忆
+- 将目录、文件和精确到行的代码位置保存为仓库书签。
+- 默认使用紧凑侧边栏，也可以从顶部切换到标准模式。
+- 侧边栏界面支持英文和中文切换。
+- 侧边栏主题支持：跟随编辑器、深色、浅色、极光、咖啡、紫夜、高对比度、日光、清爽浅色。
+- 通过一级右键菜单快速添加书签，例如 `JumpJump: Add Current File`。
+- 支持按全部、置顶、目录、文件、代码位置、失效目标进行搜索和筛选。
+- 支持在每个分组内部置顶重要书签。
+- 支持创建、重命名、删除、折叠和拖拽调整分组。
+- 右键分组标题可以打开和 `...` 按钮一致的分组菜单。
+- 支持在同一分组内拖拽书签，也支持跨分组拖拽移动；拖拽排序会自动把目标分组切换为手动排序。
+- 可以从书签菜单把书签移动到其他分组。
+- 文件或目录移动、删除后，可以一键清理失效书签。
 
-## 30 秒上手
+## 快速开始
 
-1. 在 VS Code / Cursor 安装 `JumpJump`
-2. 打开任意一个代码仓库
-3. 点击 Activity Bar 中的 `JumpJump` 图标
-4. 通过右键菜单或侧边栏 `添加` 把常用位置收进来
+1. 安装 `JumpJump`。
+2. 在 VS Code 或 Cursor 中打开一个单仓库目录。
+3. 点击 Activity Bar 里的 JumpJump 图标。
+4. 通过右键菜单添加常用文件、文件夹或代码位置。
+5. 当书签列表变多后，把它们整理到不同分组里。
 
-## 核心功能入口
+## 添加书签
 
-- 编辑器标签页右键
-  - `JumpJump · 添加本文件 / Add Current File`
-  - `JumpJump · 添加本文件所在目录 / Add Current Folder`
-- 编辑器内容区右键
-  - `JumpJump · 添加当前代码位置 / Add Current Location`
-- 资源管理器右键文件夹
-  - `JumpJump · 文件夹 / Folder`
-- 侧边栏按钮
-  - `添加`
-  - `清理失效书签`
-  - `刷新 / Refresh`
+JumpJump 提供一级右键菜单入口：
 
-## 书签类型
+| 右键位置 | 可用操作 |
+| --- | --- |
+| 编辑器标签页或标题区域 | `JumpJump: Add Current File`、`JumpJump: Add Current Folder` |
+| 编辑器内容区域 | `JumpJump: Add Current Location`、`JumpJump: Add Current File`、`JumpJump: Add Current Folder` |
+| 资源管理器文件 | `JumpJump: Add Current File` |
+| 资源管理器文件夹 | `JumpJump: Add Current Folder` |
 
-JumpJump 支持三类书签：
+`Add Current Location` 会保存当前文件和光标所在行。它有意放在编辑器内容区域，因为只有在那里当前行才有明确含义。
 
-- 文件夹
-- 文件
-- 代码位置
+## 侧边栏工作流
 
-新增后会默认进入 `未分组`，方便你先收集、后整理。
+- 点击书签即可打开目标位置。
+- 使用书签上的 `...` 可以打开、置顶或取消置顶、移动到分组、重命名或删除书签。
+- 点击分组标题可以折叠或展开分组。
+- 使用分组上的 `Sort` 可以选择手动、名称、创建时间、更新时间或类型排序。
+- 拖拽分组标题可以调整自定义分组顺序。
+- 拖拽书签卡片可以在分组内排序，也可以移动到其他分组。
 
-## 分组与排序
+只有在列表没有被搜索或类型筛选时，拖拽排序才会启用。
 
-- `未分组` 是系统默认分组
-- 你可以手动创建自己的业务分组
-- 书签可移动到任意分组
-- 自定义分组之间支持拖拽调整顺序
-- 每个分组都可以单独设置排序方式：
-  - 手动
-  - 名称
-  - 添加时间
-  - 修改时间
-  - 类型
+## 显示偏好
 
-当分组处于 `手动` 排序时，卡片上会显示上移 / 下移按钮。
+侧边栏顶部包含：
 
-## 跳转与维护
+- `Mode`：在紧凑布局和标准布局之间切换。
+- `Language`：在英文和中文之间切换。
+- 主题按钮：选择 JumpJump 侧边栏自己的配色。
 
-- 左键点击书签：直接打开目标
-- 文件夹书签：定位目录
-- 文件书签：打开文件
-- 代码位置书签：打开文件并跳到指定行
-- 目标不存在时：显示失效状态，并可一键清理
+紧凑模式是默认布局。它会保持侧边栏的信息密度，适合日常导航，同时仍然保留搜索、筛选、分组和书签操作。主题选择只影响 JumpJump 侧边栏，不会改变整个编辑器主题。
 
-## 书签保存位置
+## 书签存储
 
-JumpJump 会把数据保存在当前仓库根目录下：
+书签数据保存在当前仓库中：
 
 ```text
 .jumpjump/bookmarks.json
@@ -216,25 +234,45 @@ JumpJump 会把数据保存在当前仓库根目录下：
 
 这意味着：
 
-- A 项目的书签不会在 B 项目中显示
-- 书签属于仓库本身，而不是当前编辑器窗口
-- 你可以把书签随项目一起提交到 Git
+- 每个仓库都有自己的书签集合。
+- 如果希望团队共享导航，可以把书签文件提交到 Git。
+- JumpJump 不会把书签上传到远程服务。
+
+用户偏好和书签数据分开存储：
+
+- 语言和主题保存为编辑器级扩展状态。
+- 紧凑模式保存为 VS Code/Cursor 用户设置 `jumpjump.compactMode`。
 
 ## 当前限制
 
-- 当前版本按单一仓库工作，不做多仓库合并视图
-- 代码位置书签基于 `文件路径 + 行号`
-- 文件内容变化较大时，行号可能发生漂移
-- 当前不支持函数 / 类 / 符号级书签
+- JumpJump 一次只支持单工作区目录。
+- 代码位置书签使用 `文件路径 + 行号`。
+- 大幅编辑文件后，已保存的行号可能发生偏移。
+- 暂不支持函数、类、符号级书签。
 
-## 隐私说明
+## 开发
 
-JumpJump 将书签保存在当前仓库内，不会把书签上传到远程服务。
+```bash
+npm install
+npm run lint
+npm test
+npm run build
+```
 
-## 开源协议
+打包本地 VSIX：
 
-JumpJump 使用 Apache License, Version 2.0 开源。详见 [LICENSE](LICENSE)。
+```bash
+npm run package:vsix
+```
+
+## 隐私
+
+JumpJump 会把书签数据保存在当前仓库本地，不会发送到任何远程服务。
 
 ## Bug 反馈
 
 - 提交地址：<https://github.com/SivanCola/JumpJump/issues>
+
+## 许可证
+
+JumpJump 使用 Apache License, Version 2.0 授权。详见 [LICENSE](LICENSE)。

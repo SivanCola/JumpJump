@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { strict as assert } from "assert";
-import { listMoveGroupTargets, sortSectionItems } from "../src/sidebar/view";
-import { BookmarkGroup, BookmarkItem } from "../src/types";
+import type { BookmarkGroup, BookmarkItem } from "../src/types";
+
+const { listMoveGroupTargets, sortSectionItems } = require("../src/sidebar/helpers") as typeof import("../src/sidebar/helpers");
 
 function makeGroup(sortBy: BookmarkGroup["sortBy"]): BookmarkGroup {
   return {
@@ -65,6 +66,21 @@ describe("sidebar sorting", () => {
     assert.deepEqual(
       ordered.map((item) => item.id),
       ["b", "a", "c"]
+    );
+  });
+
+  it("sorts by bookmark type in the same order as the sidebar filters", () => {
+    const items = [
+      makeItem("line", 2, { type: "line", label: "line" }),
+      makeItem("file", 1, { type: "file", label: "file" }),
+      makeItem("folder", 0, { type: "folder", label: "folder" })
+    ];
+
+    const ordered = sortSectionItems(items, makeGroup("type"));
+
+    assert.deepEqual(
+      ordered.map((item) => item.id),
+      ["folder", "file", "line"]
     );
   });
 

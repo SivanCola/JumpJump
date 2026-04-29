@@ -7,6 +7,7 @@ import * as os from "os";
 import * as path from "path";
 import { UNGROUPED_GROUP_ID } from "../src/bookmarks/schema";
 import { BookmarkStore } from "../src/bookmarks/store";
+import { sortSectionItems } from "../src/sidebar/helpers";
 
 describe("BookmarkStore", () => {
   let workspaceRoot: string;
@@ -45,6 +46,38 @@ describe("BookmarkStore", () => {
     assert.equal(bookmark.groupId, UNGROUPED_GROUP_ID);
     const saved = await store.read();
     assert.equal(saved.groups[0].id, UNGROUPED_GROUP_ID);
+  });
+
+  it("preserves concurrent bookmark additions", async () => {
+    const filePaths = await Promise.all(
+      Array.from({ length: 20 }, async (_, index) => {
+        const filePath = path.join(workspaceRoot, `file-${index}.ts`);
+        await fs.writeFile(filePath, `export const n = ${index};\n`, "utf8");
+        return filePath;
+      })
+    );
+
+    await Promise.all(
+      filePaths.map((filePath, index) =>
+        store.addBookmark({
+          type: "file",
+          label: `file-${index}.ts`,
+          absolutePath: filePath
+        })
+      )
+    );
+
+    const saved = await store.read();
+    assert.equal(saved.items.length, filePaths.length);
+    assert.equal(new Set(saved.items.map((item) => item.label)).size, filePaths.length);
+  });
+
+  it("keeps workspace-root bookmarks valid and rejects paths outside the workspace", () => {
+    assert.equal(store.toRelativePath(workspaceRoot), ".");
+    assert.equal(path.resolve(store.resolveAbsolutePath(".")), path.resolve(workspaceRoot));
+    assert.equal(store.isPathInsideWorkspace(workspaceRoot), true);
+    assert.equal(store.isPathInsideWorkspace(path.join(workspaceRoot, "src", "index.ts")), true);
+    assert.equal(store.isPathInsideWorkspace(path.join(path.dirname(workspaceRoot), "outside.ts")), false);
   });
 
   it("creates groups and moves bookmarks", async () => {
@@ -112,6 +145,110 @@ describe("BookmarkStore", () => {
     const ordered = saved.items.filter((item) => item.groupId === group.id).sort((a, b) => a.manualOrder - b.manualOrder);
     assert.equal(ordered[0].id, second.id);
     assert.equal(ordered[1].id, first.id);
+  });
+
+  it("moves pinned bookmarks according to the visible manual order", async () => {
+    const firstPath = path.join(workspaceRoot, "a.py");
+    const secondPath = path.join(workspaceRoot, "b.py");
+    const thirdPath = path.join(workspaceRoot, "c.py");
+    await fs.writeFile(firstPath, "print('a')\n", "utf8");
+    await fs.writeFile(secondPath, "print('b')\n", "utf8");
+    await fs.writeFile(thirdPath, "print('c')\n", "utf8");
+    const group = await store.createGroup("置顶排序");
+    const first = await store.addBookmark({ type: "file", label: "a.py", absolutePath: firstPath, groupId: group.id });
+    const second = await store.addBookmark({ type: "file", label: "b.py", absolutePath: secondPath, groupId: group.id });
+    const third = await store.addBookmark({ type: "file", label: "c.py", absolutePath: thirdPath, groupId: group.id });
+    await store.togglePinned(first.id);
+    await store.togglePinned(third.id);
+
+    const moved = await store.moveBookmarkWithinGroup(first.id, "down");
+
+    const saved = await store.read();
+    const savedGroup = saved.groups.find((entry) => entry.id === group.id);
+    assert.equal(moved, true);
+    assert.ok(savedGroup);
+    const ordered = sortSectionItems(
+      saved.items
+        .filter((item) => item.groupId === group.id)
+        .map((item) => ({ ...item, missing: false, pinned: item.pinned === true })),
+      savedGroup
+    );
+    assert.deepEqual(
+      ordered.map((item) => item.id),
+      [third.id, first.id, second.id]
+    );
+  });
+
+  it("reorders bookmarks inside a manual group from an explicit order", async () => {
+    const firstPath = path.join(workspaceRoot, "a.py");
+    const secondPath = path.join(workspaceRoot, "b.py");
+    const thirdPath = path.join(workspaceRoot, "c.py");
+    await fs.writeFile(firstPath, "print('a')\n", "utf8");
+    await fs.writeFile(secondPath, "print('b')\n", "utf8");
+    await fs.writeFile(thirdPath, "print('c')\n", "utf8");
+    const group = await store.createGroup("手动排序");
+    const first = await store.addBookmark({ type: "file", label: "a.py", absolutePath: firstPath, groupId: group.id });
+    const second = await store.addBookmark({ type: "file", label: "b.py", absolutePath: secondPath, groupId: group.id });
+    const third = await store.addBookmark({ type: "file", label: "c.py", absolutePath: thirdPath, groupId: group.id });
+
+    await store.reorderBookmarksInGroup(group.id, [third.id, first.id, second.id]);
+
+    const saved = await store.read();
+    const ordered = saved.items.filter((item) => item.groupId === group.id).sort((a, b) => a.manualOrder - b.manualOrder);
+    assert.deepEqual(
+      ordered.map((item) => item.id),
+      [third.id, first.id, second.id]
+    );
+  });
+
+  it("switches a group to manual sort when bookmarks are drag-reordered", async () => {
+    const firstPath = path.join(workspaceRoot, "a.py");
+    const secondPath = path.join(workspaceRoot, "b.py");
+    await fs.writeFile(firstPath, "print('a')\n", "utf8");
+    await fs.writeFile(secondPath, "print('b')\n", "utf8");
+    const group = await store.createGroup("名称排序");
+    const first = await store.addBookmark({ type: "file", label: "a.py", absolutePath: firstPath, groupId: group.id });
+    const second = await store.addBookmark({ type: "file", label: "b.py", absolutePath: secondPath, groupId: group.id });
+    await store.setGroupSort(group.id, "label", "asc");
+
+    await store.reorderBookmarksInGroup(group.id, [second.id, first.id]);
+
+    const saved = await store.read();
+    const savedGroup = saved.groups.find((entry) => entry.id === group.id);
+    const ordered = saved.items.filter((item) => item.groupId === group.id).sort((a, b) => a.manualOrder - b.manualOrder);
+    assert.equal(savedGroup?.sortBy, "manual");
+    assert.equal(savedGroup?.sortDirection, "asc");
+    assert.deepEqual(
+      ordered.map((item) => item.id),
+      [second.id, first.id]
+    );
+  });
+
+  it("moves a bookmark to another group using a dragged order", async () => {
+    const firstPath = path.join(workspaceRoot, "a.py");
+    const secondPath = path.join(workspaceRoot, "b.py");
+    const thirdPath = path.join(workspaceRoot, "c.py");
+    await fs.writeFile(firstPath, "print('a')\n", "utf8");
+    await fs.writeFile(secondPath, "print('b')\n", "utf8");
+    await fs.writeFile(thirdPath, "print('c')\n", "utf8");
+    const sourceGroup = await store.createGroup("来源");
+    const targetGroup = await store.createGroup("目标");
+    const moved = await store.addBookmark({ type: "file", label: "a.py", absolutePath: firstPath, groupId: sourceGroup.id });
+    const targetFirst = await store.addBookmark({ type: "file", label: "b.py", absolutePath: secondPath, groupId: targetGroup.id });
+    const targetSecond = await store.addBookmark({ type: "file", label: "c.py", absolutePath: thirdPath, groupId: targetGroup.id });
+    await store.setGroupSort(targetGroup.id, "label", "asc");
+
+    await store.moveBookmarkToGroupAndReorder(moved.id, targetGroup.id, [targetFirst.id, moved.id, targetSecond.id]);
+
+    const saved = await store.read();
+    const savedTargetGroup = saved.groups.find((entry) => entry.id === targetGroup.id);
+    const ordered = saved.items.filter((item) => item.groupId === targetGroup.id).sort((a, b) => a.manualOrder - b.manualOrder);
+    assert.equal(saved.items.find((item) => item.id === moved.id)?.groupId, targetGroup.id);
+    assert.equal(savedTargetGroup?.sortBy, "manual");
+    assert.deepEqual(
+      ordered.map((item) => item.id),
+      [targetFirst.id, moved.id, targetSecond.id]
+    );
   });
 
   it("reorders groups and falls back to ungrouped on delete", async () => {
